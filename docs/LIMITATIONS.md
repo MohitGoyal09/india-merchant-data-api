@@ -56,6 +56,10 @@ what that means.
     settled Mon 2019-02-04) disagree. So both modes exist: `working_days` (the default) and
     `calendar_then_roll`.
   - A real deployment would confirm the merchant's actual cycle and cut-off time.
+- **Holiday names are RBI's combined names.** RBI publishes one name per date that joins the
+  festivals of every region (for example "Gudhi Padwa/Ugadi Festival/Telugu New Year's Day/…" on
+  2026-03-19). Its per-office list uses the same combined string. Dates and holiday kinds are
+  per office, and they are correct. Only the display name is shared across regions.
 - **Holidays are per RBI regional office (34 cities), not per bank branch or state.** A merchant's
   settlement depends on its bank's location. Mapping that location to the nearest RBI office is
   left to the caller.
@@ -72,10 +76,16 @@ what that means.
 
 - **Single node, SQLite, sync code.** That is fine for this data volume (about 50k rows in total),
   but not for multi-tenant scale.
-- **Webhook SSRF guard:** the target's DNS is resolved and checked at registration and again
-  before each delivery. httpx then resolves the name once more when it connects, so DNS
-  rebinding is narrowed but not fully closed. The fix is to pin the connection to the IP address
-  that was already validated.
+- **Webhook SSRF guard:** the target's DNS is resolved once per delivery. Every address must be
+  public, and the connection is pinned to the validated IP (`Host` and TLS SNI keep the original
+  name), so DNS rebinding cannot redirect a delivery. Residual risk: an HTTP proxy configured
+  around the dispatcher would bypass the pin. Egress firewall rules are the defence in depth.
+- **Webhooks are at-least-once.** Each delivery is claimed in the database before it is sent. If
+  a dispatcher crashes after sending but before recording the result, the claim expires after
+  10 minutes and the event is sent again. Receivers should de-duplicate on `X-IMDA-Event-Id`.
+- **Refresh and dispatch locks are per process.** Run one worker process. Several API or worker
+  processes could refresh at the same time, which would break the 1-request-per-2-s upstream
+  limit. A multi-node setup needs a shared lock (for example, a database lease row).
 - **The admin token is a single shared bearer token.** Read endpoints are open and meant for
   localhost. Production would add per-client keys, rate limits on our own API, and TLS
   termination.

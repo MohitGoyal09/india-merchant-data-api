@@ -228,6 +228,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -247,6 +257,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Service links",
@@ -293,6 +313,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -312,6 +342,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Liveness (no database access)",
@@ -362,6 +402,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -408,7 +458,7 @@
       "post": {
         "operationId": "dispatch_webhooks_v1_admin_webhooks_dispatch_post",
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {}
@@ -446,6 +496,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -482,7 +542,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Run one webhook delivery pass now",
+        "summary": "Start one webhook delivery pass in the background",
         "tags": [
           "admin"
         ]
@@ -568,6 +628,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -587,6 +657,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Is a date a working day for an office?",
@@ -691,6 +771,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -710,6 +800,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "The next N working days after a date",
@@ -786,6 +886,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -805,6 +915,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Subscribable iCalendar feed of RBI holidays",
@@ -916,6 +1036,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -935,6 +1065,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "RBI against FBIL on overlapping dates",
@@ -1089,6 +1229,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1108,6 +1258,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Convert between INR and a foreign currency",
@@ -1289,6 +1449,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1308,6 +1478,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "FX reference rate history",
@@ -1422,6 +1602,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1441,6 +1631,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "The rate in force on a date",
@@ -1575,6 +1775,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1594,6 +1804,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Per-week or per-month statistics",
@@ -1713,6 +1933,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1732,6 +1962,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "RBI bank holidays",
@@ -1813,6 +2053,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1832,6 +2082,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Quote a cross-border invoice",
@@ -1896,6 +2156,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1915,6 +2185,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "RBI regional offices",
@@ -2020,6 +2300,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2039,6 +2329,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "FBIL overnight MIBOR",
@@ -2175,6 +2475,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2194,6 +2504,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Indicative settlement date for a captured payment",
@@ -2234,6 +2554,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2253,6 +2583,16 @@
               }
             },
             "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The data store is not set up"
           }
         },
         "summary": "Source health: status, drift and freshness",
@@ -2302,6 +2642,16 @@
               }
             },
             "description": "Holiday data for that year is not loaded"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
           },
           "422": {
             "content": {
@@ -2395,6 +2745,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2485,6 +2845,16 @@
             },
             "description": "Holiday data for that year is not loaded"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2521,7 +2891,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Stop a subscription",
+        "summary": "Stop a subscription (its secret is erased)",
         "tags": [
           "webhooks"
         ]
@@ -2591,6 +2961,16 @@
               }
             },
             "description": "Holiday data for that year is not loaded"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
           },
           "422": {
             "content": {

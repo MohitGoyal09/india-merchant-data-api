@@ -72,12 +72,16 @@ The `request_id` is also sent in the `X-Request-ID` response header. A client ma
 | 405 | `METHOD_NOT_ALLOWED` | Wrong HTTP method for the route. |
 | 409 | `CALENDAR_DATA_MISSING` | Holiday data for that office and year is not loaded. `details.hint` has the command to load it. |
 | 409 | `REFRESH_IN_PROGRESS` | A refresh is already running (`POST /v1/admin/refresh`). |
-| 422 | `INVALID_REQUEST` | A parameter failed type checks: bad date format, unknown currency, number out of range. `details.errors` lists each field. |
-| 422 | `VALIDATION_ERROR` | A rule failed after parsing: `from` after `to`, an amount with more than 2 decimal places, an invalid cursor, a page `limit` above the maximum. |
+| 409 | `DISPATCH_IN_PROGRESS` | A webhook dispatch pass is already running (`POST /v1/admin/webhooks/dispatch`). |
+| 413 | `PAYLOAD_TOO_LARGE` | The request body is larger than `IMDA_MAX_REQUEST_BODY_BYTES` (64 KiB by default). |
+| 422 | `INVALID_REQUEST` | A parameter failed type checks: bad date format, a date outside 2000-01-01..2100-12-31, unknown currency, a page `limit` above the maximum, an invalid cursor. `details.errors` lists each field. |
+| 422 | `VALIDATION_ERROR` | A business rule failed after parsing: `from` after `to`, an amount that is not positive or has more than 2 decimal places, an unknown webhook event. |
 | 422 | `RANGE_TOO_LARGE` | The date range is longer than 3660 days. |
 | 422 | `UNSAFE_WEBHOOK_URL` | The webhook URL is not `https`, or it points to a private, loopback or link-local address. |
+| 429 | `REFRESH_COOLDOWN` | A refresh ran less than `IMDA_REFRESH_COOLDOWN_SECONDS` ago (300 s by default). `Retry-After` says when to try again. |
 | 500 | `INTERNAL_ERROR` | Unexpected server error. The details are in the server log under the same request id. |
-| 503 | `ADMIN_DISABLED` | `IMDA_ADMIN_TOKEN` is not set, so admin endpoints are off. |
+| 503 | `ADMIN_DISABLED` | `IMDA_ADMIN_TOKEN` is not set, so admin endpoints are off. A set token must have at least 32 characters. |
+| 503 | `STORE_UNAVAILABLE` | The database file does not exist or is not migrated. Run `imda backfill` first. |
 
 An upstream failure (RBI or FBIL down, page changed) never causes a 500. The API serves the last
 good data and sets `meta.degraded` to `true`.

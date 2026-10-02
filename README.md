@@ -167,7 +167,7 @@ Read endpoints are open (meant for localhost). Admin endpoints need
 | GET | `/v1/rates/mibor?from=&to=` | Overnight MIBOR. |
 | GET | `/v1/sources/health` | Status, drift and freshness for each source. |
 | POST, GET, DELETE | `/v1/webhooks`, `/v1/webhooks/{id}`, GET `/v1/webhooks/{id}/deliveries` | Create (secret shown once), list, stop, and read the delivery log. (admin) |
-| POST | `/v1/admin/refresh`, `/v1/admin/webhooks/dispatch` | Start a background refresh. Run one webhook delivery pass. (admin) |
+| POST | `/v1/admin/refresh`, `/v1/admin/webhooks/dispatch` | Start a background refresh (cooldown 300 s). Start one background webhook delivery pass. Both return `202`. (admin) |
 
 CLI: `imda backfill`, `refresh`, `status`, `serve`, `canary`, `worker`, `webhooks dispatch`.
 
