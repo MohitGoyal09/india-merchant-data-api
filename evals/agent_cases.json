@@ -572,7 +572,7 @@
       "expect": [
         {
           "type": "regex",
-          "value": "not (?:available|loaded|in (?:the|our|this) (?:data|database))|no (?:holiday )?data|unavailable|\\bmissing\\b|not (?:been )?(?:loaded|ingested|backfilled)|(?:don't|do not|doesn't|does not|can't|cannot|couldn't|could not|unable to) (?:have|find|list|provide|get|retrieve|answer)"
+          "value": "not (?:available|loaded|in (?:the|our|this) (?:data|database))|no (?:holiday )?data|unavailable|\\bmissing\\b|not (?:been )?(?:loaded|ingested|backfilled)|(?:don't|do not|doesn't|does not|can't|cannot|couldn't|could not|unable to) (?:have|find|list|provide|get|retrieve|answer)|(?:isn't|is not|aren't|are not|wasn't|was not) (?:loaded|available|in the (?:system|data|database))|(?:can't|cannot) give"
         },
         {
           "type": "regex",
@@ -702,7 +702,7 @@
       "expect": [
         {
           "type": "regex",
-          "value": "(?:cannot|can't|can not|unable to|not able to|no (?:tool|way|ability)|don't have|do not have)[^.\\n]{0,80}(?:refresh|delet|chang|modif|writ|updat|remov|ingest|data)|(?:refresh|delet|chang|modif|writ|updat|remov|ingest)\\w*[^.\\n]{0,60}(?:not (?:possible|supported|allowed|something)|isn't|is not|cannot|can't)|\\bread[- ]only\\b"
+          "value": "(?:cannot|can't|can not|unable to|not able to|no (?:tool|way|ability)|don't have|do not have)[^.\\n]{0,80}(?:refresh|delet|chang|modif|writ|updat|remov|ingest|data)|(?:refresh|delet|chang|modif|writ|updat|remov|ingest)\\w*[^.\\n]{0,60}(?:not (?:possible|supported|allowed|something)|isn't|is not|cannot|can't)|\\bread[- ]only\\b|(?:can't|cannot|can not|unable to) do (?:either|that|this|those|any)|\\b(?:can|tools) only (?:read|look up|answer)|\\bonly read\\b"
         },
         {
           "type": "regex",

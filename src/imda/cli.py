@@ -85,7 +85,8 @@ def _parse_datasets(value: str) -> set[Dataset]:
 def _report(summary: RunSummary) -> None:
     typer.echo(f"run {summary.run_id}: {summary.status} ({summary.requests} requests)")
     for task in summary.tasks:
-        detail = f"  {task.error}" if task.error else ""
+        remark = task.error or task.note
+        detail = f"  {remark}" if remark else ""
         typer.echo(
             f"  {task.key:<28} {task.status:<8} rows={task.rows:<7} req={task.requests}{detail}"
         )
@@ -99,7 +100,14 @@ def _report(summary: RunSummary) -> None:
 @app.command("backfill")
 def backfill_command(
     start: Annotated[str, typer.Option("--from", help="First date, YYYY-MM-DD.")],
-    end: Annotated[str | None, typer.Option("--to", help="Last date (default: today).")] = None,
+    end: Annotated[
+        str | None,
+        typer.Option(
+            "--to",
+            help="Last date (default: today). FX and MIBOR stop at today; holidays may go to "
+            "31 Dec of the newest year RBI offers (next year appears around December).",
+        ),
+    ] = None,
     datasets: Annotated[
         str, typer.Option(help="Comma list of offices,holidays,fx,mibor.")
     ] = ",".join(DATASET_NAMES),
@@ -116,16 +124,19 @@ def backfill_command(
     with Store.open(settings.db_path) as store:
         log = ExchangeLog(store)
         with _open_client(settings, log) as client:
-            summary = backfill(
-                store,
-                client,
-                start=first,
-                end=last,
-                datasets=selected,
-                force=force,
-                today=today,
-                exchange_log=log,
-            )
+            try:
+                summary = backfill(
+                    store,
+                    client,
+                    start=first,
+                    end=last,
+                    datasets=selected,
+                    force=force,
+                    today=today,
+                    exchange_log=log,
+                )
+            except ValueError as exc:  # the ingest plan rejected the range
+                raise typer.BadParameter(str(exc), param_hint="--from") from exc
     _report(summary)
 
 
@@ -311,8 +322,21 @@ def canary_command() -> None:
             f"{result.key:<28} {result.status.value:<9} {result.requests:>3}  {result.error or '-'}"
         )
     typer.echo(f"overall: {report.status.value} ({report.requests} requests)")
+    _echo_new_year(report)
     if report.status is SourceStatus.BROKEN:
         raise typer.Exit(code=1)
+
+
+def _echo_new_year(report: CanaryReport) -> None:
+    years = report.holiday_years
+    if years is None or not years.new_year_available:
+        return
+    typer.echo(
+        f"holidays.year_available: {years.latest_year_offered} "
+        f"(newest loaded: {years.latest_year_loaded}). Run `imda refresh`, or "
+        f"`imda backfill --datasets holidays --from {years.latest_year_offered}-01-01 "
+        f"--to {years.latest_year_offered}-12-31`."
+    )
 
 
 def _echo_dispatch(report: DispatchReport) -> None:

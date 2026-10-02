@@ -80,6 +80,46 @@ def test_backfill_all_failed_exits_one(env: Env) -> None:
     assert "every dataset failed" in result.output
 
 
+FUTURE = ["--from", "2027-01-01", "--to", "2027-12-31", "--datasets", "holidays"]
+
+
+def test_backfill_loads_next_year_holidays_when_rbi_offers_it(env: Env) -> None:
+    env.fake.extra_years = (2027,)
+
+    result = runner.invoke(cli.app, ["backfill", *FUTURE])
+
+    assert result.exit_code == 0, result.output
+    with Store.open(env.db) as store:
+        assert store.holidays("mumbai", 2027)
+
+
+def test_backfill_next_year_not_offered_exits_zero_with_a_clear_message(env: Env) -> None:
+    result = runner.invoke(cli.app, ["backfill", *FUTURE])
+
+    assert result.exit_code == 0, result.output
+    assert "skipped" in result.output
+    assert "2027 not offered by RBI yet" in result.output
+    with Store.open(env.db) as store:
+        assert store.holidays("mumbai", 2027) == []
+
+
+def test_backfill_future_range_is_rejected_when_fx_is_selected(env: Env) -> None:
+    result = runner.invoke(cli.app, ["backfill", "--from", "2027-01-01", "--to", "2027-12-31"])
+
+    assert result.exit_code == 2
+    assert "after end" in result.output
+    assert "holidays" in result.output
+    assert env.fake.requests == []
+
+
+def test_backfill_help_says_which_datasets_may_go_past_today() -> None:
+    result = runner.invoke(cli.app, ["backfill", "--help"])
+
+    text = " ".join(result.output.replace("│", " ").split())
+    assert "FX and MIBOR stop at today" in text
+    assert "31 Dec of the newest year RBI offers" in text
+
+
 def test_refresh_runs_and_reports(env: Env) -> None:
     result = runner.invoke(cli.app, ["refresh"])
     assert result.exit_code == 0, result.output
@@ -186,3 +226,25 @@ def test_status_hides_errors_that_were_followed_by_a_success(row, expected):
     from imda.cli import _current_error
 
     assert _current_error(row) == expected
+
+
+def test_canary_prints_the_new_year_and_how_to_load_it(env: Env) -> None:
+    assert (
+        runner.invoke(cli.app, ["backfill", "--from", "2026-01-01", "--to", "2026-12-31"]).exit_code
+        == 0
+    )
+    env.fake.extra_years = (2027,)
+
+    result = runner.invoke(cli.app, ["canary"])
+
+    assert result.exit_code == 0, result.output
+    assert "holidays.year_available: 2027" in result.output
+    assert "imda refresh" in result.output
+    assert "overall: ok" in result.output
+
+
+def test_canary_prints_no_year_line_without_a_new_year(env: Env) -> None:
+    result = runner.invoke(cli.app, ["canary"])
+
+    assert result.exit_code == 0, result.output
+    assert "year_available" not in result.output

@@ -25,7 +25,7 @@ from imda.sources.fbil.common import chunk_ranges
 from imda.sources.rbi.aspnet import extract_select_options
 from imda.sources.rbi.holidays import HOLIDAYS_URL, YEAR_SELECT, RbiHolidayAdapter
 from imda.sources.rbi.offices import parse_offices
-from imda.store.repo import HolidayDiff
+from imda.store.repo import HolidayDiff, Store
 
 RBI_FX_ERAS: tuple[tuple[dt.date, dt.date | None], ...] = (
     (dt.date(2000, 1, 3), dt.date(2018, 7, 24)),
@@ -77,7 +77,12 @@ class HolidayContext:
     adapter: RbiHolidayAdapter
     client: HttpClient
     offices: tuple[Office, ...]
-    max_year: int
+    years: tuple[int, ...]
+    """Every year in RBI's ``drYear`` dropdown, ascending."""
+
+    @property
+    def max_year(self) -> int:
+        return self.years[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,24 +103,33 @@ def prepare_holidays(env: RunEnv) -> HolidayContext:
         adapter=RbiHolidayAdapter(),
         client=env.page.session_client(HOLIDAYS_URL),
         offices=tuple(offices),
-        max_year=_max_year(page),
+        years=offered_years(page),
     )
 
 
-def _max_year(page: RawPayload) -> int:
+def offered_years(page: RawPayload) -> tuple[int, ...]:
+    """The years in RBI's ``drYear`` dropdown, ascending."""
     options = extract_select_options(
         page.text(), YEAR_SELECT, source=Source.RBI, dataset=Dataset.HOLIDAYS
     )
-    years = [int(value) for value, _ in options if value.isdigit()]
+    years = sorted({int(value) for value, _ in options if value.isdigit()})
     if not years:
         raise ParseError(Source.RBI, Dataset.HOLIDAYS, "no years in the year dropdown")
-    return max(years)
+    return tuple(years)
 
 
 def year_loaded(env: RunEnv, year: int) -> bool:
-    offices = env.store.offices()
-    loaded = env.store.loaded_years()
-    return bool(offices) and all(year in loaded.get(o.slug, frozenset()) for o in offices)
+    return year in fully_loaded_years(env.store)
+
+
+def fully_loaded_years(store: Store) -> frozenset[int]:
+    """Years whose 12 months are loaded for every office (none while there are no offices)."""
+    offices = store.offices()
+    if not offices:
+        return frozenset()
+    loaded = store.loaded_years()
+    per_office = [loaded.get(o.slug, frozenset()) for o in offices]
+    return frozenset.intersection(*per_office)
 
 
 def load_holiday_month(

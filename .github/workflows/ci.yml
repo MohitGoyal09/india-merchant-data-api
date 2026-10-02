@@ -57,6 +57,8 @@ jobs:
       - run: uv run bandit -r src -q -ll
       # Known vulnerabilities in the installed dependencies fail the job.
       - run: uv run pip-audit
+      # High-signal key patterns in tracked files fail the job (allowlist: .secrets-allowlist).
+      - run: uv run python scripts/scan_secrets.py
 
   # Builds the image and probes api + mcp under an isolated compose project.
   container:

@@ -73,7 +73,9 @@ demo-mcp:
 smoke-compose:
 	bash scripts/smoke_compose.sh
 
-# Static security scan (medium+ severity fails) and known-vulnerability scan of the lockfile deps.
+# Static security scan (medium+ severity fails), known-vulnerability scan of the lockfile deps,
+# and a secret scan of git-tracked files (fake test values go in .secrets-allowlist).
 security:
 	uv run bandit -r src -q -ll
 	uv run pip-audit
+	uv run python scripts/scan_secrets.py

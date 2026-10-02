@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from imda.health.canary import MAX_REQUESTS, CanaryReport, run_canary
+from imda.health.canary import MAX_REQUESTS, CanaryReport, HolidayYears, run_canary
 from imda.ingest.common import ExchangeLog
 from imda.models import Dataset, Source, SourceStatus
 from imda.store.repo import Store
@@ -24,6 +24,8 @@ from tests.unit.test_ingest import (
     event_names,
     health,
     read,
+    run_backfill,
+    run_refresh,
 )
 
 DATA_TABLES = ("fx_rates", "mibor_rates", "holidays", "offices", "holiday_years")
@@ -259,3 +261,128 @@ def test_today_is_taken_from_the_argument(store: Store) -> None:
 
     posts = [r for r in client.requests if r.method == "POST" and r.url == HOLIDAYS_URL]
     assert (posts[0].form or {})["drMonth"] == "9"
+
+
+# ---------------------------------------------------------------- next year's holidays
+def load_2026(store: Store) -> None:
+    """Load the whole of 2026 (a prior backfill) so the canary has a latest loaded year."""
+    window = (dt.date(2026, 1, 1), dt.date(2026, 12, 31))
+    run_backfill(store, FakeUpstream(), {Dataset.HOLIDAYS}, window=window)
+
+
+def year_events(store: Store) -> list[dict[str, object]]:
+    return [
+        e["payload"]  # type: ignore[misc]
+        for e in store.events_since(None, 1000)
+        if e["event"] == "holidays.year_available"
+    ]
+
+
+def test_canary_reports_the_years_rbi_offers_and_the_latest_loaded(store: Store) -> None:
+    load_2026(store)
+
+    report = canary(store, FakeUpstream())
+
+    years = report.holiday_years
+    assert years is not None
+    assert years.latest_year_offered == 2026
+    assert years.latest_year_loaded == 2026
+    assert years.new_year_available is False
+    assert years.years_offered[0] == 2001
+    assert years.years_offered[-1] == 2026
+    assert year_events(store) == []
+
+
+def test_a_new_year_keeps_status_ok_and_records_one_event(store: Store) -> None:
+    load_2026(store)
+
+    report = canary(store, FakeUpstream(extra_years=(2027,)))
+
+    assert report.status is SourceStatus.OK
+    years = report.holiday_years
+    assert years is not None
+    assert years.years_offered[-2:] == (2026, 2027)
+    assert years.latest_year_offered == 2027
+    assert years.latest_year_loaded == 2026
+    assert years.new_year_available is True
+    [event] = year_events(store)
+    assert event["year"] == 2027
+    assert event["latest_year_loaded"] == 2026
+    assert source_events(store) == []  # not a health transition
+
+
+def test_the_event_is_recorded_once_per_year(store: Store) -> None:
+    load_2026(store)
+
+    canary(store, FakeUpstream(extra_years=(2027,)))
+    canary(store, FakeUpstream(extra_years=(2027,)))
+    third = canary(store, FakeUpstream(extra_years=(2027,)))
+
+    assert third.holiday_years is not None
+    assert third.holiday_years.new_year_available is True  # still reported every run
+    assert [e["year"] for e in year_events(store)] == [2027]
+
+    canary(store, FakeUpstream(extra_years=(2027, 2028)))
+    assert [e["year"] for e in year_events(store)] == [2027, 2028]
+
+
+def test_loading_the_new_year_clears_the_flag(store: Store) -> None:
+    load_2026(store)
+    canary(store, FakeUpstream(extra_years=(2027,)))
+    run_refresh(store, FakeUpstream(extra_years=(2027,)))
+
+    report = canary(store, FakeUpstream(extra_years=(2027,)))
+
+    years = report.holiday_years
+    assert years is not None
+    assert years.latest_year_loaded == 2027
+    assert years.new_year_available is False
+    assert [e["year"] for e in year_events(store)] == [2027]
+
+
+def test_an_empty_database_is_not_a_new_year(store: Store) -> None:
+    report = canary(store, FakeUpstream(extra_years=(2027,)))
+
+    years = report.holiday_years
+    assert years is not None
+    assert years.latest_year_loaded is None
+    assert years.new_year_available is False
+    assert year_events(store) == []
+
+
+def test_year_facts_reach_the_report_dict_and_the_stored_health_row(store: Store) -> None:
+    load_2026(store)
+
+    report = canary(store, FakeUpstream(extra_years=(2027,)))
+
+    expected = {
+        "years_offered": list(range(2001, 2028)),
+        "latest_year_offered": 2027,
+        "latest_year_loaded": 2026,
+        "new_year_available": True,
+    }
+    data = report.as_dict()
+    assert json.loads(json.dumps(data)) == data
+    assert data["holiday_years"] == expected
+    row = next(r for r in store.source_health() if r["dataset"] == "holidays")
+    assert row["drift"]["holiday_years"] == expected  # type: ignore[index]
+    assert row["drift"]["drifted"] is False  # type: ignore[index]
+
+
+def test_a_missing_year_dropdown_is_broken(store: Store) -> None:
+    page = read("rbi/holidays_page.html").replace(b'name="drYear"', b'name="drYearX"')
+
+    report = canary(store, FakeUpstream(garbage={HOLIDAYS_URL: page}))
+
+    holidays = result(report, Source.RBI, Dataset.HOLIDAYS)
+    assert holidays.status is SourceStatus.BROKEN
+    assert "drYear" in str(holidays.error)
+    assert report.holiday_years is None
+
+
+def test_holiday_years_round_trip_and_reject_malformed_data() -> None:
+    years = HolidayYears.compare((2025, 2026, 2027), frozenset({2025, 2026}))
+
+    assert HolidayYears.from_dict(years.as_dict()) == years
+    assert HolidayYears.from_dict("nope") is None
+    assert HolidayYears.from_dict({"years_offered": "x"}) is None

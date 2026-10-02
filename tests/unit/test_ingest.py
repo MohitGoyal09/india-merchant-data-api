@@ -65,6 +65,7 @@ class FakeUpstream:
         garbage: dict[str, bytes] | None = None,
         fail_month: int | None = None,
         wrong_month: bool = False,
+        extra_years: tuple[int, ...] = (),
         on_exchange: Callable[[ExchangeEvent], None] | None = None,
     ) -> None:
         self.requests: list[UpstreamRequest] = []
@@ -72,6 +73,7 @@ class FakeUpstream:
         self.garbage = dict(garbage or {})
         self.fail_month = fail_month
         self.wrong_month = wrong_month
+        self.extra_years = extra_years
         self._on_exchange = on_exchange
 
     def attach(self, log: ExchangeLog) -> None:
@@ -126,7 +128,7 @@ class FakeUpstream:
 
     def _holidays(self, request: UpstreamRequest) -> bytes:
         if request.method == "GET":
-            return read("rbi/holidays_page.html")
+            return self._holidays_page()
         form = request.form or {}
         year, month = int(form["drYear"]), int(form["drMonth"])
         assert form["drRegionalOffice"] == "0"
@@ -139,6 +141,14 @@ class FakeUpstream:
         if recorded.exists():
             return recorded.read_bytes()
         return synthesize_month(year, month)
+
+    def _holidays_page(self) -> bytes:
+        """The recorded page, with ``extra_years`` added to the ``drYear`` dropdown."""
+        page = read("rbi/holidays_page.html")
+        newest = b'<option selected="selected" value="2026">2026</option>'
+        assert newest in page
+        extra = b"".join(f'<option value="{y}">{y}</option>\n'.encode() for y in self.extra_years)
+        return page.replace(newest, extra + newest, 1)
 
     def _rbi_fx(self, request: UpstreamRequest) -> bytes:
         if request.method == "GET":
@@ -412,6 +422,95 @@ def test_holiday_years_are_limited_to_what_rbi_offers(store: Store) -> None:
     years = {int((r.form or {})["drYear"]) for r in client.requests if r.form}
     assert years == {2026}
     assert summary.status == "ok"
+
+
+# ---------------------------------------------------------------- next year's holidays
+FUTURE_YEAR = (dt.date(2027, 1, 1), dt.date(2027, 12, 31))
+
+
+def holiday_posts(client: FakeUpstream) -> list[tuple[int, int]]:
+    return [
+        (int((r.form or {})["drYear"]), int((r.form or {})["drMonth"]))
+        for r in client.requests
+        if r.url == HOLIDAYS_URL and r.form
+    ]
+
+
+def test_backfill_loads_next_year_for_holidays_when_rbi_offers_it(store: Store) -> None:
+    client = FakeUpstream(extra_years=(2027,))
+
+    summary = run_backfill(store, client, {Dataset.HOLIDAYS}, window=FUTURE_YEAR)
+
+    assert summary.status == "ok"
+    assert summary.tasks[0].status == "ok"
+    assert holiday_posts(client) == [(2027, month) for month in range(1, 13)]
+    assert {y for years in store.loaded_years().values() for y in years} == {2027}
+    assert store.holidays("mumbai", 2027)
+
+
+def test_backfill_next_year_not_offered_is_skipped_with_a_clear_note(store: Store) -> None:
+    client = FakeUpstream()
+
+    summary = run_backfill(store, client, {Dataset.HOLIDAYS}, window=FUTURE_YEAR)
+
+    [task] = summary.tasks
+    assert task.status == "skipped"
+    assert task.note is not None
+    assert "2027" in task.note
+    assert "not offered" in task.note
+    assert "2026" in task.note  # says what RBI does offer
+    assert holiday_posts(client) == []
+    assert store.loaded_years() == {}
+
+
+def test_backfill_loads_what_is_offered_and_notes_what_is_not(store: Store) -> None:
+    client = FakeUpstream()
+
+    summary = run_backfill(
+        store,
+        client,
+        {Dataset.HOLIDAYS},
+        window=(dt.date(2026, 1, 1), dt.date(2028, 12, 31)),
+    )
+
+    [task] = summary.tasks
+    assert task.status == "ok"
+    assert {y for y, _ in holiday_posts(client)} == {2026}
+    assert task.note is not None
+    assert "2027" in task.note
+    assert "2028" in task.note
+
+
+def test_backfill_caps_fx_and_mibor_at_today_even_when_holidays_go_further(store: Store) -> None:
+    client = FakeUpstream(extra_years=(2027,))
+
+    run_backfill(
+        store,
+        client,
+        {Dataset.HOLIDAYS, Dataset.MIBOR},
+        window=(dt.date(2026, 9, 1), dt.date(2027, 12, 31)),
+    )
+
+    mibor = next(r for r in client.requests if r.url == FBIL_MIBOR_URL)
+    assert mibor.params["toDate"] == TODAY.isoformat()
+    assert (2027, 12) in holiday_posts(client)
+
+
+def test_backfill_with_fx_still_rejects_a_start_after_today(store: Store) -> None:
+    client = FakeUpstream(extra_years=(2027,))
+    with pytest.raises(ValueError, match="after end"):
+        run_backfill(store, client, {Dataset.HOLIDAYS, Dataset.FX}, window=FUTURE_YEAR)
+    assert client.requests == []
+
+
+def test_backfill_holidays_still_rejects_start_after_end(store: Store) -> None:
+    with pytest.raises(ValueError, match="after end"):
+        run_backfill(
+            store,
+            FakeUpstream(extra_years=(2027,)),
+            {Dataset.HOLIDAYS},
+            window=(dt.date(2027, 6, 1), dt.date(2027, 1, 1)),
+        )
 
 
 def test_month_for_the_wrong_period_is_a_parse_failure(store: Store) -> None:
@@ -771,6 +870,63 @@ def test_refresh_in_december_does_not_ask_for_an_unpublished_year(store: Store) 
     ]
     assert {y for y, _ in posts} == {2026}
     assert len(posts) == 12
+
+
+def test_refresh_loads_a_newly_offered_year_once(store: Store) -> None:
+    client = FakeUpstream(extra_years=(2027,))
+
+    summary = run_refresh(store, client, TODAY)
+
+    assert summary.status == "ok"
+    posts = holiday_posts(client)
+    assert sorted(m for y, m in posts if y == 2027) == list(range(1, 13))  # 12 POSTs, once
+    assert len([p for p in posts if p[0] == 2026]) == 12
+    assert {y for years in store.loaded_years().values() for y in years} == {2026, 2027}
+    updates = [
+        e["payload"]["period"]  # type: ignore[index]
+        for e in store.events_since(None, 1000)
+        if e["event"] == "holidays.updated"
+    ]
+    assert any(str(p).startswith("2027-") for p in updates)
+
+    client.requests.clear()
+    second = run_refresh(store, client, TODAY)
+
+    assert second.status == "ok"
+    assert sorted(holiday_posts(client)) == [(2026, 10), (2026, 11)]  # 2027 is not fetched again
+
+
+def test_refresh_retries_a_next_year_that_failed_part_way(store: Store) -> None:
+    client = FakeUpstream(extra_years=(2027,), fail_month=7)
+    first = run_refresh(store, client, TODAY)
+    assert first.status == "partial"
+    assert 2027 not in {y for years in store.loaded_years().values() for y in years}
+
+    client.fail_month = None
+    client.requests.clear()
+    second = run_refresh(store, client, TODAY)
+
+    assert second.status == "ok"
+    assert {y for years in store.loaded_years().values() for y in years} == {2026, 2027}
+    assert len([p for p in holiday_posts(client) if p[0] == 2027]) == 12
+
+
+def test_refresh_ignores_offered_years_before_the_current_year(store: Store) -> None:
+    client = FakeUpstream()
+
+    run_refresh(store, client, TODAY)
+
+    assert {y for y, _ in holiday_posts(client)} == {2026}
+
+
+def test_refresh_in_december_with_next_year_offered_loads_the_whole_year(store: Store) -> None:
+    client = FakeUpstream(extra_years=(2027,))
+
+    run_refresh(store, client, dt.date(2026, 12, 15))
+
+    posts = holiday_posts(client)
+    assert sorted(m for y, m in posts if y == 2027) == list(range(1, 13))
+    assert len(posts) == 24  # January 2027 is not fetched a second time
 
 
 def test_refresh_isolates_failures(store: Store) -> None:

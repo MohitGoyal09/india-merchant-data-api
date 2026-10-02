@@ -44,7 +44,11 @@ def refresh(
     exchange_log: ExchangeLog | None = None,
     baselines: Baselines | None = None,
 ) -> RunSummary:
-    """Offices, holidays (this month, next month, this year if missing), FX and MIBOR."""
+    """Offices, holidays, FX and MIBOR.
+
+    Holidays: this month and next month, plus every year RBI offers from this year on that is not
+    fully loaded yet (so next year loads as soon as RBI publishes it).
+    """
     plan: list[Task] = [
         (Source.RBI, Dataset.OFFICES, load_offices),
         (Source.RBI, Dataset.HOLIDAYS, _refresh_holidays),
@@ -82,16 +86,25 @@ def _refresh_holidays(env: RunEnv) -> TaskOutput:
     ctx = prepare_holidays(env)
     months = _months_to_load(env, ctx)
     rows, last = 0, None
-    if not year_loaded(env, env.today.year) and _year_in_range(env.today.year, ctx):
-        loaded = load_holiday_year(ctx, env.today.year)
-        rows, last = loaded.rows, loaded.raw
-        months = [m for m in months if m[0] != env.today.year]
+    for year in _years_to_load(env, ctx):
+        loaded = load_holiday_year(ctx, year)
+        rows, last = rows + loaded.rows, loaded.raw
+        months = [m for m in months if m[0] != year]
     for year, month in months:
         diffs, last = load_holiday_month(ctx, year, month)
         rows += count_changes([diffs])
     if last is None:
         return TaskOutput(rows=0, skipped=True)
     return TaskOutput(rows=rows, fingerprint=ctx.adapter.fingerprint(last))
+
+
+def _years_to_load(env: RunEnv, ctx: HolidayContext) -> list[int]:
+    """Offered years from the current one on that are not loaded for every office."""
+    return [
+        y
+        for y in ctx.years
+        if y >= max(env.today.year, HOLIDAYS_FIRST_YEAR) and not year_loaded(env, y)
+    ]
 
 
 def _months_to_load(env: RunEnv, ctx: HolidayContext) -> list[tuple[int, int]]:

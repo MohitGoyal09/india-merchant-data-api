@@ -194,24 +194,25 @@ A failed delivery is tried 3 times, with waits of 30 s, 2 min and 10 min. Receiv
 
 ## 9. Add next year's holidays
 
-RBI usually publishes the next year in December ([LIMITATIONS.md](LIMITATIONS.md) section 3).
+RBI usually publishes the next year in December ([LIMITATIONS.md](LIMITATIONS.md) section 3). Nothing is needed from you: the worker's `refresh` loads the new year. The steps below tell you how to see it and how to load it by hand.
 
-1. Know how the code sees it. `refresh` and `backfill` read the `drYear` dropdown on RBI's page on every run. The newest option is the limit for loading. The canary does not flag a new year: the year list is left out of the fingerprint on purpose (`src/imda/sources/rbi/holidays.py`).
-2. In December, `imda refresh` loads this month and next month. When the new year is in the dropdown, January of that year loads too. Month loads do not mark the year as loaded.
-3. `imda backfill` caps `--to` at today. So a full load of a year that has not started fails: `--from` after today is rejected. Load the full year on or after 1 January:
+1. Know how the code sees it. Every `refresh`, `backfill` and `canary` run reads the `drYear` dropdown on RBI's page. The newest option is the limit for loading holidays.
+2. The canary flags it. When RBI offers a year that is newer than the newest fully loaded year, `imda canary` keeps the status `ok` and prints a line `holidays.year_available: 2027 (newest loaded: 2026)`. It records the event `holidays.year_available` once per year. The facts are in the `imda canary` output and in the stored health row: `years_offered`, `latest_year_offered`, `latest_year_loaded`, `new_year_available` (key `holiday_years` in the `drift` JSON of `rbi/holidays`). On a database with no loaded year, the flag stays off.
+3. `imda refresh` loads it. After it reads the holiday page, it loads every offered year from the current year on that is not fully loaded (12 monthly requests per year), as well as this month and next month. A year that loaded fully is not fetched again. A year that failed part way is retried on the next run. Each changed month records `holidays.updated`.
+4. To load it by hand, name the range. `backfill` caps FX and MIBOR at today, but holidays may go to 31 December of the newest year RBI offers. Give `--to` and select only holidays:
 
    ```bash
-   uv run imda backfill --datasets holidays --from 2027-01-01
+   uv run imda backfill --datasets holidays --from 2027-01-01 --to 2027-12-31
    ```
 
-   The worker's refresh also loads the current year when it is missing.
-4. Verify:
+   If RBI does not offer 2027 yet, the holidays task is `skipped` and the output says `holidays for 2027 not offered by RBI yet (newest year in its dropdown: 2026)`. Nothing is written. With FX or MIBOR selected, a `--from` after today is rejected.
+5. Verify:
 
    ```bash
    sqlite3 data/imda.sqlite3 "SELECT year,COUNT(*) FROM holiday_years GROUP BY year;"   # 34 rows for the new year
    curl -s "$H/v1/holidays?year=2027&office=mumbai" | jq '.meta.count'
-   uv run imda canary
+   uv run imda canary   # no holidays.year_available line once the year is loaded
    ```
 
-5. Known gap: until the full year loads, a settlement ETA that reaches the new year returns `CALENDAR_DATA_MISSING`. Tell the agent owner before late December.
-6. The error `details.hint` shows `imda backfill --datasets holidays --from YYYY-01-01`. Before 1 January that command fails as in step 3.
+6. Known gap: until the full year loads, a settlement ETA that reaches the new year returns `CALENDAR_DATA_MISSING`. Tell the agent owner before late December.
+7. The error `details.hint` shows `imda backfill --datasets holidays --from YYYY-01-01`. Add `--to YYYY-12-31` for a year that has not started.

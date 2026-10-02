@@ -85,6 +85,10 @@ class TaskOutput:
     rows: int
     fingerprint: dict[str, object] | None = None
     skipped: bool = False
+    note: str | None = None
+    """A human-readable remark about the run (shown by the CLI, kept in the run summary)."""
+    extra: dict[str, object] | None = None
+    """Structured facts kept with the source health row next to the drift report."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +102,8 @@ class TaskResult:
     health: SourceStatus | None = None
     """Health recorded for the source (``degraded`` when parsing worked but the shape drifted)."""
     drift: DriftReport | None = None
+    note: str | None = None
+    extra: dict[str, object] | None = None
 
     @property
     def key(self) -> str:
@@ -125,6 +131,8 @@ def _task_dict(task: TaskResult) -> dict[str, object]:
         "requests": task.requests,
         "error": task.error,
     }
+    if task.note is not None:
+        entry["note"] = task.note
     if task.drift is not None and task.drift.drifted:
         entry["drift"] = task.drift.as_dict()
     return entry
@@ -212,7 +220,7 @@ def execute_task(
         return _failed(env, source, dataset, SourceStatus.BROKEN, message, before)
     requests = env.log.attempts - before
     if output.skipped:
-        return TaskResult(source, dataset, "skipped", requests=requests)
+        return TaskResult(source, dataset, "skipped", requests=requests, note=output.note)
     drift = _check_drift(env, source, dataset, output.fingerprint)
     status = SourceStatus.DEGRADED if drift is not None and drift.drifted else SourceStatus.OK
     error = drift.summary() if status is SourceStatus.DEGRADED and drift is not None else None
@@ -222,12 +230,30 @@ def execute_task(
         status,
         error=error,
         fingerprint=output.fingerprint,
-        drift=None if drift is None else drift.as_dict(),
+        drift=_drift_payload(drift, output.extra),
     )
     _record_transition(env.store, source, dataset, previous, status, error)
     return TaskResult(
-        source, dataset, "ok", rows=output.rows, requests=requests, health=status, drift=drift
+        source,
+        dataset,
+        "ok",
+        rows=output.rows,
+        requests=requests,
+        health=status,
+        drift=drift,
+        note=output.note,
+        extra=output.extra,
     )
+
+
+def _drift_payload(
+    drift: DriftReport | None, extra: dict[str, object] | None
+) -> dict[str, object] | None:
+    """The drift report as stored in ``source_health.drift_json``, plus any structured extras."""
+    if drift is None and not extra:
+        return None
+    base: dict[str, object] = {} if drift is None else drift.as_dict()
+    return {**base, **(extra or {})}
 
 
 def _check_drift(

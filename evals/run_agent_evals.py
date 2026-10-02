@@ -298,6 +298,14 @@ def _parse_case(raw: Any, index: int, seen: set[str], problems: list[str]) -> Ag
     )
 
 
+_QUOTES = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'})
+
+
+def _normalise_quotes(text: str) -> str:
+    """Models sometimes answer with curly quotes; checks are written with straight ones."""
+    return text.translate(_QUOTES)
+
+
 def _check_truth_refs(case: AgentCase, problems: list[str]) -> None:
     for expect in case.expect:
         match = _TRUTH_REF.match(expect.truth or "")
@@ -352,8 +360,10 @@ def _number_found(expect: Expect, text: str) -> bool:
 def check_holds(expect: Expect, text: str) -> bool:
     """Whether one check passes for ``text``. ``negate`` flips the result."""
     if expect.type == "contains":
+        text = _normalise_quotes(text)
         found = str(expect.value).lower() in text.lower()
     elif expect.type == "regex":
+        text = _normalise_quotes(text)
         found = re.search(str(expect.value), text, re.IGNORECASE) is not None
     else:
         found = _number_found(expect, text)

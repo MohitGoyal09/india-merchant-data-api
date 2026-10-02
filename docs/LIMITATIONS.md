@@ -44,7 +44,9 @@ what that means.
 - FBIL can lag. On 2026-10-02 its latest row was 2026-09-24, while RBI had 2026-10-01.
   `stale: true` shows on the provenance, and `auto` fails over to RBI.
 - RBI's holiday dropdown covers 2001 to the current year. Next year's holidays appear when RBI
-  publishes them (usually in December). The canary and refresh pick them up.
+  publishes them (usually in December). The canary flags the new year (`holidays.year_available`,
+  status stays `ok`) and `imda refresh` loads it. `imda backfill --datasets holidays --from
+  2027-01-01 --to 2027-12-31` loads it by hand ([RUNBOOK.md](RUNBOOK.md) section 9).
 - AED and IDR rates start on 2026-01-05.
 
 ## 4. Domain simplifications
