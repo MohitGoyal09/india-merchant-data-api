@@ -259,15 +259,16 @@ def test_parse_raises_when_request_form_lacks_query_context() -> None:
         RbiHolidayAdapter().parse(bare)
 
 
-def test_parse_raises_on_unknown_marker_glyph() -> None:
+def test_new_glyph_with_ni_act_legend_is_accepted() -> None:
     payload = _replace_body(
         "holidays_all_2026_03",
         '<span aria-hidden="true" style="font-size:20px;color:red">•',
         "<span>?",
     )
 
-    with pytest.raises(ParseError, match="marker"):
-        RbiHolidayAdapter().parse(payload)
+    holidays = RbiHolidayAdapter().parse(payload)
+    assert holidays
+    assert {h.kind for h in holidays} <= {HolidayKind.NI_ACT, HolidayKind.CLOSING_OF_ACCOUNTS}
 
 
 def test_parse_raises_when_a_marked_day_has_no_description() -> None:
@@ -503,3 +504,24 @@ def test_empty_notice_for_another_month_is_a_parse_error():
     raw = load_payload("holidays_all_2005_06_empty", body=html.encode())
     with pytest.raises(ParseError, match="does not match the request"):
         RbiHolidayAdapter().parse(raw)
+
+
+def test_rtgs_triangle_marker_is_classified_by_legend_text():
+    # 2007 pages mark Mumbai with "▲" = NI Act holiday and RTGS holiday.
+    holidays = RbiHolidayAdapter().parse(load_payload("holidays_all_2007_01_rtgs"))
+    mumbai = {(h.date.day, h.kind) for h in holidays if h.office_slug == "mumbai"}
+    assert all(kind is HolidayKind.NI_ACT for _, kind in mumbai)
+    assert len(mumbai) >= 2
+
+
+def test_marker_without_known_glyph_or_legend_is_a_parse_error():
+    html = (
+        load_html("holidays_all_2007_01_rtgs")
+        .replace("&#9650;", "&#9670;")
+        .replace(
+            "Holiday under Negotiable Instruments Act and Real Time Gross Settlement Holiday",
+            "Something new",
+        )
+    )
+    with pytest.raises(ParseError, match="unknown marker"):
+        RbiHolidayAdapter().parse(load_payload("holidays_all_2007_01_rtgs", body=html.encode()))

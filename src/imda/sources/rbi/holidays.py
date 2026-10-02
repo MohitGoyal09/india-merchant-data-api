@@ -77,9 +77,11 @@ def _marker_kind(cell: Node) -> HolidayKind | None:
             glyph, style = clean_text(span), (span.attributes.get("style") or "").lower()
     if glyph == CLOSING_GLYPH or "firebrick" in style or "closing of accounts" in hidden:
         return HolidayKind.CLOSING_OF_ACCOUNTS
-    if glyph == NI_ACT_GLYPH:
+    # The hidden legend text is authoritative; glyphs vary by year (e.g. "▲" in 2007 means
+    # "Holiday under Negotiable Instruments Act and Real Time Gross Settlement Holiday").
+    if glyph == NI_ACT_GLYPH or "negotiable instruments act" in hidden:
         return HolidayKind.NI_ACT
-    raise _fail(f"unknown marker {glyph!r}")
+    raise _fail(f"unknown marker {glyph!r} ({hidden or 'no legend text'})")
 
 
 def _office_slugs(html: str) -> dict[str, str]:
