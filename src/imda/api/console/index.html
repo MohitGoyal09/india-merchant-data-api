@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Merchant Console - India Merchant Data API</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/console/assets/console.css">
+<script type="module" src="/console/assets/console.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#settlement">Skip to panels</a>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="brand">
+      <p class="kicker">Finance desk</p>
+      <h1>Merchant Console</h1>
+      <p class="tagline">RBI and FBIL data, read the way a settlements team reads it. All times IST.</p>
+    </div>
+    <a class="overall" id="overall" href="#health" aria-live="polite">
+      <span class="overall-label">Data health</span>
+      <span class="pill pill-unknown" id="overall-pill">Checking</span>
+    </a>
+  </div>
+</header>
+
+<main>
+  <section class="panel panel-eta" id="settlement" aria-labelledby="eta-h">
+    <header class="panel-head">
+      <span class="numeral" aria-hidden="true">01</span>
+      <div>
+        <h2 id="eta-h">Settlement ETA</h2>
+        <p class="lede">When does a payment captured now reach the account? Counts only days the RBI office is open.</p>
+      </div>
+    </header>
+    <form class="form" id="eta-form" novalidate>
+      <div class="field">
+        <label for="eta-captured">Captured at <span class="hint">(IST)</span></label>
+        <input type="datetime-local" id="eta-captured" name="captured" required>
+      </div>
+      <div class="field">
+        <label for="eta-office">RBI office</label>
+        <select id="eta-office" name="office" required></select>
+      </div>
+      <div class="field field-narrow">
+        <label for="eta-cycle">Cycle days</label>
+        <input type="number" id="eta-cycle" name="cycle" min="0" max="30" step="1" value="2" inputmode="numeric" required>
+      </div>
+      <fieldset class="field segmented" aria-describedby="eta-mode-help">
+        <legend>Counting mode</legend>
+        <div class="seg-row">
+          <input type="radio" id="eta-mode-wd" name="mode" value="working_days" checked>
+          <label for="eta-mode-wd">Working days</label>
+          <input type="radio" id="eta-mode-cr" name="mode" value="calendar_then_roll">
+          <label for="eta-mode-cr">Calendar, then roll</label>
+        </div>
+        <p class="hint" id="eta-mode-help">Working days: count N open days. Calendar then roll: add N calendar days, then move forward to an open day.</p>
+      </fieldset>
+      <div class="actions">
+        <button type="submit" class="btn">Estimate settlement</button>
+        <button type="button" class="btn btn-quiet" id="eta-example">Try 27 Mar 2026</button>
+      </div>
+    </form>
+    <div class="output" id="eta-out" aria-live="polite" aria-busy="false">
+      <p class="state state-empty">Pick a capture time and office, then estimate.</p>
+    </div>
+  </section>
+
+  <section class="panel panel-quote" id="invoice" aria-labelledby="quote-h">
+    <header class="panel-head">
+      <span class="numeral" aria-hidden="true">02</span>
+      <div>
+        <h2 id="quote-h">Invoice quote</h2>
+        <p class="lede">A foreign-currency invoice in rupees, at the rate in force on the invoice date.</p>
+      </div>
+    </header>
+    <form class="form" id="quote-form" novalidate>
+      <div class="field">
+        <label for="quote-amount">Amount</label>
+        <input type="text" id="quote-amount" name="amount" inputmode="decimal" autocomplete="off" value="1200" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="quote-currency">Currency</label>
+        <select id="quote-currency" name="currency">
+          <option>USD</option><option>GBP</option><option>EUR</option>
+          <option>JPY</option><option>AED</option><option>IDR</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="quote-date">Invoice date</label>
+        <input type="date" id="quote-date" name="invoice_date" min="2000-01-01" max="2100-12-31" required>
+      </div>
+      <div class="field">
+        <label for="quote-office">RBI office</label>
+        <select id="quote-office" name="office" required></select>
+      </div>
+      <div class="field">
+        <label for="quote-captured">Captured at <span class="hint">(IST, optional)</span></label>
+        <input type="datetime-local" id="quote-captured" name="captured">
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn">Get quote</button>
+      </div>
+    </form>
+    <div class="output" id="quote-out" aria-live="polite" aria-busy="false">
+      <p class="state state-empty">Enter an invoice to see its rupee value.</p>
+    </div>
+  </section>
+
+  <section class="panel panel-fx" id="fx" aria-labelledby="fx-h">
+    <header class="panel-head">
+      <span class="numeral" aria-hidden="true">03</span>
+      <div>
+        <h2 id="fx-h">FX explorer</h2>
+        <p class="lede">Reference rate history in INR per unit. Ticks on the baseline are Mumbai bank holidays.</p>
+      </div>
+    </header>
+    <form class="form" id="fx-form" novalidate>
+      <div class="field field-narrow">
+        <label for="fx-currency">Currency</label>
+        <select id="fx-currency" name="currency">
+          <option>USD</option><option>GBP</option><option>EUR</option>
+          <option>JPY</option><option>AED</option><option>IDR</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fx-from">From</label>
+        <input type="date" id="fx-from" name="from" min="2000-01-01" max="2100-12-31" required>
+      </div>
+      <div class="field">
+        <label for="fx-to">To</label>
+        <input type="date" id="fx-to" name="to" min="2000-01-01" max="2100-12-31" required>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn">Load rates</button>
+        <button type="button" class="btn btn-quiet" id="fx-sept">Sept 2026</button>
+      </div>
+    </form>
+    <div class="output" id="fx-out" aria-live="polite" aria-busy="false">
+      <p class="state state-empty">Choose a currency and range to draw the series.</p>
+    </div>
+  </section>
+
+  <section class="panel panel-health" id="health" aria-labelledby="health-h">
+    <header class="panel-head">
+      <span class="numeral" aria-hidden="true">04</span>
+      <div>
+        <h2 id="health-h">Data health</h2>
+        <p class="lede">Is each upstream source fetching, fresh and unchanged in shape?</p>
+      </div>
+    </header>
+    <div class="actions actions-bare">
+      <button type="button" class="btn btn-quiet" id="health-refresh">Recheck</button>
+    </div>
+    <div class="output" id="health-out" aria-live="polite" aria-busy="false">
+      <p class="state state-empty">Not checked yet.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="colophon">
+  <p>Same data as the REST API, one request per figure. Estimates are indicative and not a settlement engine. Not affiliated with RBI, FBIL or Razorpay.</p>
+  <p><a href="/">API index</a></p>
+</footer>
+</body>
+</html>

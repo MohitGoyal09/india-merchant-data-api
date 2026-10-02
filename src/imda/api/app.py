@@ -16,6 +16,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from imda import __version__
+from imda.api.console.routes import router as console_router
 from imda.api.deps import SnapshotCache
 from imda.api.errors import (
     ERROR_RESPONSES,
@@ -218,4 +219,5 @@ def create_app(
         admin,
     ):
         app.include_router(module.router)
+    app.include_router(console_router)
     return app
