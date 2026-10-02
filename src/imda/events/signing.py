@@ -46,7 +46,12 @@ def _signed_payload(body: bytes, timestamp: int | None) -> bytes:
 
 
 def sign(secret: str, body: bytes, timestamp: int | None = None) -> str:
-    """Hex HMAC-SHA256 of ``body`` (prefixed with ``"{timestamp}."`` when a timestamp is given)."""
+    """Hex HMAC-SHA256 of ``body`` (prefixed with ``"{timestamp}."`` when a timestamp is given).
+
+    Raises ``ValueError`` for an empty secret (a deleted subscription forgets its secret).
+    """
+    if not secret:
+        raise ValueError("signing secret must not be empty")
     return hmac.new(
         secret.encode("utf-8"), _signed_payload(body, timestamp), hashlib.sha256
     ).hexdigest()
@@ -62,8 +67,11 @@ def verify(
 ) -> bool:
     """Constant-time check of ``signature``. With ``timestamp``, also reject stale or future ones.
 
-    Returns False (never raises) for any mismatch, including a malformed signature.
+    Returns False (never raises) for any mismatch, including a malformed signature or an
+    empty secret.
     """
+    if not secret:
+        return False
     if timestamp is not None:
         current = time.time() if now is None else now
         if abs(current - timestamp) > tolerance:

@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi.testclient import TestClient
 
 from imda.health.drift import DriftReport
-from imda.models import Dataset, Source, SourceStatus
+from imda.models import IST, Dataset, Source, SourceStatus
 from imda.store.repo import Store
-from tests.api.conftest import STALE_NOW, MakeClient
+from tests.api.conftest import MakeClient
 from tests.api.helpers import assert_envelope, body
 
 URL = "/v1/sources/health"
+# After the 13:30 cutoff the day itself is expected, so the 09-24 rows are one day behind.
+AFTERNOON = dt.datetime(2026, 9, 25, 15, 0, tzinfo=IST)
+STALE_AFTERNOON = dt.datetime(2026, 10, 1, 15, 0, tzinfo=IST)
 
 
 def by_key(parsed: dict) -> dict[str, dict]:  # type: ignore[type-arg]
     return {f"{s['source']}/{s['dataset']}": s for s in parsed["data"]["sources"]}
 
 
-def test_empty_health_still_reports_freshness_and_unknown_status(client: TestClient) -> None:
-    parsed = body(client.get(URL))
+def test_empty_health_still_reports_freshness_and_unknown_status(make_client: MakeClient) -> None:
+    parsed = body(make_client(now=AFTERNOON).get(URL))
 
     assert_envelope(parsed)
     assert parsed["data"]["status"] == "unknown"
@@ -100,7 +105,7 @@ def test_all_ok_is_ok(client: TestClient, store: Store) -> None:
 
 
 def test_stale_data_is_flagged_with_a_warning(make_client: MakeClient) -> None:
-    parsed = body(make_client(now=STALE_NOW).get(URL))
+    parsed = body(make_client(now=STALE_AFTERNOON).get(URL))
 
     fbil = by_key(parsed)["fbil/fx_reference_rates"]
     assert fbil["freshness"]["stale"] is True

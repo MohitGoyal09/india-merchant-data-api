@@ -8,7 +8,13 @@ from typing import Any
 
 import pytest
 
-from imda.events.ssrf import MAX_URL_LENGTH, UnsafeWebhookUrl, validate_webhook_url
+from imda.events.ssrf import (
+    MAX_URL_LENGTH,
+    UnsafeWebhookUrl,
+    redact_url,
+    resolve_webhook_url,
+    validate_webhook_url,
+)
 
 
 def resolving_to(*addresses: str) -> Callable[..., list[tuple[Any, ...]]]:
@@ -176,3 +182,76 @@ def test_embedded_ipv4_extraction_is_defence_in_depth() -> None:
     assert "10.0.0.1" in embedded("2001:0:4136:e378:8000:63bf:f5ff:fffe")
     assert embedded("64:ff9b::a00:1") == ["10.0.0.1"]
     assert embedded("2606:4700::1111") == []
+
+
+# ------------------------------------------------------------------ pinning (DNS rebinding)
+def test_resolve_returns_url_host_port_and_validated_addresses() -> None:
+    resolved = resolve_webhook_url(
+        "HTTPS://Example.COM:8443/hook?a=1#frag",
+        allow_private=False,
+        resolver=resolving_to("93.184.216.34", "2606:4700::1111"),
+    )
+    assert resolved.url == "https://example.com:8443/hook?a=1"
+    assert resolved.host == "example.com"
+    assert [str(a) for a in resolved.addresses] == ["93.184.216.34", "2606:4700::1111"]
+
+
+def test_pin_uses_first_ip_original_host_header_and_sni() -> None:
+    resolved = resolve_webhook_url(
+        "https://example.com/hook?a=1", allow_private=False, resolver=PUBLIC
+    )
+    pinned = resolved.pin()
+    assert pinned.url == "https://93.184.216.34/hook?a=1"
+    assert pinned.host_header == "example.com"
+    assert pinned.sni_hostname == "example.com"
+
+
+def test_pin_keeps_explicit_port_in_host_header() -> None:
+    pinned = resolve_webhook_url(
+        "https://example.com:8443/h", allow_private=False, resolver=PUBLIC
+    ).pin()
+    assert pinned.url == "https://93.184.216.34:8443/h"
+    assert pinned.host_header == "example.com:8443"
+
+
+def test_pin_brackets_an_ipv6_address() -> None:
+    pinned = resolve_webhook_url(
+        "https://example.com/h", allow_private=False, resolver=resolving_to("2606:4700::1111")
+    ).pin()
+    assert pinned.url == "https://[2606:4700::1111]/h"
+    assert pinned.host_header == "example.com"
+
+
+def test_pin_for_an_ip_literal_url_needs_no_sni() -> None:
+    pinned = resolve_webhook_url(
+        "https://93.184.216.34/h", allow_private=False, resolver=PUBLIC
+    ).pin()
+    assert pinned.url == "https://93.184.216.34/h"
+    assert pinned.host_header == "93.184.216.34"
+    assert pinned.sni_hostname is None
+
+
+def test_pin_for_an_ipv6_literal_url_keeps_brackets_in_host_header() -> None:
+    pinned = resolve_webhook_url(
+        "https://[2606:4700::1111]:444/h",
+        allow_private=False,
+        resolver=resolving_to("2606:4700::1111"),
+    ).pin()
+    assert pinned.host_header == "[2606:4700::1111]:444"
+    assert pinned.sni_hostname is None
+
+
+def test_resolve_rejects_what_validate_rejects() -> None:
+    with pytest.raises(UnsafeWebhookUrl):
+        resolve_webhook_url(
+            "https://example.com/", allow_private=False, resolver=resolving_to("10.0.0.1")
+        )
+
+
+def test_redact_url_keeps_scheme_and_host_only() -> None:
+    assert (
+        redact_url("https://hook.example.com:8443/in?token=secret") == "https://hook.example.com/…"
+    )
+    assert redact_url("https://[2606:4700::1111]/in") == "https://[2606:4700::1111]/…"
+    assert redact_url("not a url") == "…"
+    assert redact_url("https://[::1/in") == "…"  # malformed

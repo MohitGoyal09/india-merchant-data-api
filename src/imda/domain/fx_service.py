@@ -17,6 +17,7 @@ from typing import Literal, Protocol
 
 from imda.config import Settings
 from imda.domain.calendar import CalendarDataMissing, HolidayCalendar
+from imda.errors import InvalidInput, RangeTooLarge
 from imda.models import IST, Currency, FxRate, Source
 
 SourceChoice = Literal["auto", "rbi", "fbil"]
@@ -73,7 +74,7 @@ class Conversion:
     from_currency: str
     to_currency: str
     result: Decimal
-    exact: str
+    exact: Decimal
     rates_used: tuple[AsOfResult, ...]
     is_cross_rate: bool
 
@@ -125,11 +126,13 @@ def per_unit(rate: FxRate) -> Decimal:
     return rate.rate / rate.unit
 
 
-def _check_range(start: dt.date, end: dt.date) -> None:
+def check_range(start: dt.date, end: dt.date) -> None:
+    """``end`` must not be before ``start``, and the span is capped at ``MAX_RANGE_DAYS``."""
     if end < start:
-        raise ValueError(f"end {end} is before start {start}")
-    if (end - start).days > MAX_RANGE_DAYS:
-        raise ValueError(f"Range exceeds {MAX_RANGE_DAYS} days")
+        raise InvalidInput(f"end {end} is before start {start}")
+    days = (end - start).days
+    if days > MAX_RANGE_DAYS:
+        raise RangeTooLarge(days, MAX_RANGE_DAYS)
 
 
 def _merge_auto(rows: list[FxRate]) -> list[FxRate]:
@@ -153,20 +156,20 @@ def _quantize_cents(value: Decimal) -> Decimal:
 
 def _validate_amount(amount: Decimal) -> None:
     if not amount.is_finite() or amount <= 0:
-        raise ValueError("amount must be a positive number")
+        raise InvalidInput("amount must be a positive number")
     if amount != amount.quantize(_CENT):
-        raise ValueError("amount must have at most 2 decimal places")
+        raise InvalidInput("amount must have at most 2 decimal places")
 
 
 def _parse_currency(code: str) -> Currency | None:
-    """``None`` for INR; ``ValueError`` for unsupported codes."""
+    """``None`` for INR; ``InvalidInput`` for unsupported codes."""
     upper = code.upper()
     if upper == INR:
         return None
     try:
         return Currency(upper)
     except ValueError:
-        raise ValueError(f"Unsupported currency: {code!r}") from None
+        raise InvalidInput(f"Unsupported currency: {code!r}") from None
 
 
 class FxService:
@@ -187,7 +190,7 @@ class FxService:
         self, currency: Currency, start: dt.date, end: dt.date, source: SourceChoice = "auto"
     ) -> list[FxRate]:
         """Rates in ``[start, end]``, date ASC, one per date, each with its true source."""
-        _check_range(start, end)
+        check_range(start, end)
         if source == "auto":
             return _merge_auto(self._reader.fx_rates(currency, start, end, None))
         rows = self._reader.fx_rates(currency, start, end, Source(source))
@@ -195,11 +198,12 @@ class FxService:
 
     def as_of(self, currency: Currency, day: dt.date, source: SourceChoice = "auto") -> AsOfResult:
         """The rate in force on ``day``: its own row, else the latest earlier one."""
-        lookback = dt.timedelta(days=self._settings.fx_asof_max_lookback_days)
-        by_date = {r.date: r for r in self.rates(currency, day - lookback, day, source)}
+        window = min(self._settings.fx_asof_max_lookback_days, (day - dt.date.min).days)
+        window_start = day - dt.timedelta(days=window)
+        by_date = {r.date: r for r in self.rates(currency, window_start, day, source)}
         if day in by_date:
             return AsOfResult(currency, day, day, by_date[day], None, 0)
-        for offset in range(1, self._settings.fx_asof_max_lookback_days + 1):
+        for offset in range(1, window + 1):
             effective = day - dt.timedelta(days=offset)
             if effective in by_date:
                 reason = self._missing_reason(day, source)
@@ -217,12 +221,12 @@ class FxService:
         """Convert between INR and a supported currency (or cross via INR).
 
         The result is rounded to 0.01 (ROUND_HALF_UP); ``exact`` keeps the
-        unrounded value as a string.
+        unrounded ``Decimal``.
         """
         _validate_amount(amount)
         src, dst = _parse_currency(from_ccy), _parse_currency(to_ccy)
         if src == dst:
-            raise ValueError("from and to currencies must differ")
+            raise InvalidInput("from and to currencies must differ")
         used: list[AsOfResult] = []
         exact = amount
         if src is not None:
@@ -236,7 +240,7 @@ class FxService:
             from_currency=from_ccy.upper(),
             to_currency=to_ccy.upper(),
             result=_quantize_cents(exact),
-            exact=str(exact),
+            exact=exact,
             rates_used=tuple(used),
             is_cross_rate=src is not None and dst is not None,
         )
@@ -258,14 +262,19 @@ class FxService:
         computed with ``float``/``math`` and returned as ``Decimal`` rounded to
         6 dp, or ``None`` with fewer than 3 points.
         """
+        return self.stats_of(self.rates(currency, start, end, source), period)
+
+    @staticmethod
+    def stats_of(rates: list[FxRate], period: Period) -> list[PeriodStats]:
+        """``stats`` over rows already fetched by ``rates`` (so a caller queries once)."""
         buckets: dict[dt.date, list[FxRate]] = {}
-        for rate in self.rates(currency, start, end, source):
+        for rate in rates:
             buckets.setdefault(_bucket_start(rate.date, period), []).append(rate)
         return [_period_stats(key, period, rows) for key, rows in sorted(buckets.items())]
 
     def compare(self, currency: Currency, start: dt.date, end: dt.date) -> CompareReport:
         """RBI against FBIL on dates where both published (per-1-unit values)."""
-        _check_range(start, end)
+        check_range(start, end)
         rbi = {r.date: r for r in self._reader.fx_rates(currency, start, end, Source.RBI)}
         fbil = {r.date: r for r in self._reader.fx_rates(currency, start, end, Source.FBIL)}
         both = sorted(rbi.keys() & fbil.keys())

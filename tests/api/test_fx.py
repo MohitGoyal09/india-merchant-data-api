@@ -130,7 +130,7 @@ def test_rates_limit_above_the_configured_maximum_is_rejected(
     small = settings.model_copy(update={"max_page_size": 50})
     client = make_client(custom=small)
 
-    assert_error(client.get(f"{RATES}?{YEAR_2021}&limit=51"), 422, "VALIDATION_ERROR")
+    assert_error(client.get(f"{RATES}?{YEAR_2021}&limit=51"), 422, "INVALID_REQUEST")
     assert body(client.get(f"{RATES}?{YEAR_2021}"))["meta"]["count"] == 50  # default is capped
 
 
@@ -139,7 +139,7 @@ def test_rates_limit_above_the_configured_maximum_is_rejected(
     [
         ("currency=USD&from=2026-09-24&to=2026-09-21", 422, "VALIDATION_ERROR"),
         ("currency=USD&from=2000-01-01&to=2026-09-21", 422, "RANGE_TOO_LARGE"),
-        ("currency=USD&from=2021-01-01&to=2021-02-01&cursor=!!!", 422, "VALIDATION_ERROR"),
+        ("currency=USD&from=2021-01-01&to=2021-02-01&cursor=!!!", 422, "INVALID_REQUEST"),
         ("currency=USD&from=2021-01-01&to=2021-02-01&limit=0", 422, "INVALID_REQUEST"),
         ("currency=XYZ&from=2021-01-01&to=2021-02-01", 422, "INVALID_REQUEST"),
         ("currency=USD&from=2021-01-01&to=2021-02-01&source=ecb", 422, "INVALID_REQUEST"),
@@ -309,7 +309,8 @@ def test_convert_inr_to_foreign_and_cross_rate(client: TestClient) -> None:
         ("amount=-1&from=USD&to=INR&date=2026-09-24", "VALIDATION_ERROR"),
         ("amount=1.234&from=USD&to=INR&date=2026-09-24", "VALIDATION_ERROR"),
         ("amount=1&from=USD&to=USD&date=2026-09-24", "VALIDATION_ERROR"),
-        ("amount=1&from=XYZ&to=INR&date=2026-09-24", "VALIDATION_ERROR"),
+        ("amount=1&from=XYZ&to=INR&date=2026-09-24", "INVALID_REQUEST"),
+        ("amount=1&from=USD&to=XYZ&date=2026-09-24", "INVALID_REQUEST"),
         ("amount=abc&from=USD&to=INR&date=2026-09-24", "INVALID_REQUEST"),
         ("amount=1e5&from=USD&to=INR&date=2026-09-24", "INVALID_REQUEST"),
         ("amount=NaN&from=USD&to=INR&date=2026-09-24", "INVALID_REQUEST"),

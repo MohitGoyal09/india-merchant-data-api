@@ -23,14 +23,19 @@ def test_lists_all_34_offices_with_envelope_and_provenance(client: TestClient) -
     assert prov["stale"] is False
 
 
-def test_empty_database_gives_an_empty_list_without_provenance(
+def test_empty_database_gives_an_empty_list_with_fallback_provenance(
     tmp_path,
     make_client,  # type: ignore[no-untyped-def]
 ) -> None:
     from imda.config import Settings
+    from imda.store.repo import Store
 
     empty = Settings(db_path=tmp_path / "empty.sqlite3", _env_file=None)
+    Store.open(empty.db_path).close()
     parsed = body(make_client(custom=empty).get("/v1/offices"))
 
     assert parsed["data"] == []
-    assert parsed["provenance"] == []
+    (entry,) = parsed["provenance"]
+    assert (entry["source"], entry["dataset"]) == ("rbi", "offices")
+    assert entry["source_url"].startswith("https://www.rbi.org.in/")
+    assert entry["fetched_at"] is None

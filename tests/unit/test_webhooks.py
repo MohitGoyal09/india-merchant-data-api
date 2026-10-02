@@ -7,6 +7,7 @@ import json
 import logging
 import socket
 import sqlite3
+import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -27,11 +28,17 @@ from imda.events.webhooks import (
 )
 from imda.store.db import connect, migrate
 from imda.store.repo import Store
-from imda.store.webhooks_repo import ERROR_UNSAFE_URL, WebhookEvent, WebhookRepo
+from imda.store.webhooks_repo import (
+    ERROR_IN_FLIGHT,
+    ERROR_UNSAFE_URL,
+    IN_FLIGHT_TTL_SECONDS,
+    WebhookEvent,
+    WebhookRepo,
+)
 
 T0 = dt.datetime(2026, 10, 2, 8, 0, tzinfo=dt.UTC)
 URL = "https://hook.example.com/in?token=urlsecret"
-ENDPOINT = "https://hook.example.com/in"
+ENDPOINT = "https://93.184.216.34/in"  # the validated IP the dispatcher pins to
 
 
 def at(seconds: float) -> dt.datetime:
@@ -186,7 +193,7 @@ def test_500_is_retried_after_backoff_then_succeeds(
     assert (oldest.attempt, oldest.status_code, oldest.error, oldest.succeeded) == (
         1,
         500,
-        "HTTP 500",
+        "http_status",
         False,
     )
     assert (newest.attempt, newest.succeeded) == (2, True)
@@ -230,15 +237,19 @@ def test_redirect_is_a_failure_and_never_followed(
     assert not target.called
     (delivery,) = repo.deliveries(sid)
     assert delivery.status_code == 302
-    assert delivery.error is not None
-    assert "redirect" in delivery.error
+    assert delivery.error == "http_status"
 
 
 @pytest.mark.parametrize(
     ("exc", "name"),
     [
-        (httpx.ReadTimeout("slow"), "ReadTimeout"),
-        (httpx.ConnectError("refused https://hook.example.com/in?token=urlsecret"), "ConnectError"),
+        (httpx.ReadTimeout("slow"), "timeout"),
+        (httpx.ConnectTimeout("slow"), "timeout"),
+        (
+            httpx.ConnectError("refused https://hook.example.com/in?token=urlsecret"),
+            "connect_error",
+        ),
+        (httpx.RemoteProtocolError("bad 10.0.0.5:22"), "connect_error"),
     ],
 )
 @respx.mock
@@ -253,7 +264,7 @@ def test_transport_errors_are_failures_without_leaking_details(
 
     (delivery,) = repo.deliveries(sid)
     assert delivery.status_code is None
-    assert delivery.error == name
+    assert delivery.error == name  # a coarse class, never the exception text
     assert not delivery.succeeded
 
 
@@ -295,7 +306,7 @@ def test_other_subscriptions_still_deliver_when_one_is_unsafe(
     subscribe(repo, url="https://bad.example.com/in")
     subscribe(repo, url="https://good.example.com/in")
     emit(conn)
-    good = respx.post("https://good.example.com/in").mock(return_value=httpx.Response(200))
+    good = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
 
     def split(host: str, port: int, **_: Any) -> list[tuple[Any, ...]]:
         address = "10.0.0.1" if host.startswith("bad") else "93.184.216.34"
@@ -311,7 +322,7 @@ def test_other_subscriptions_still_deliver_when_one_is_unsafe(
 def test_allow_private_permits_local_http(conn: sqlite3.Connection, repo: WebhookRepo) -> None:
     subscribe(repo, url="http://localhost:9000/hook")
     emit(conn)
-    route = respx.post("http://localhost:9000/hook").mock(return_value=httpx.Response(200))
+    route = respx.post("http://127.0.0.1:9000/hook").mock(return_value=httpx.Response(200))
     settings = make_settings(allow_private_webhooks=True)
     assert run(conn, at(10), resolver=resolving_to("127.0.0.1"), settings=settings).succeeded == 1
     assert route.called
@@ -385,3 +396,218 @@ def test_register_subscription_validates_url_and_events(repo: WebhookRepo) -> No
             repo, settings, "https://hook.example.com/", ["nope"], resolver=PUBLIC
         )
     assert len(repo.list_subscriptions()) == 1
+
+
+# ------------------------------------------------------------------ DNS pinning
+@respx.mock
+def test_request_goes_to_the_validated_ip_with_original_host_and_sni(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    subscribe(repo, url="https://hook.example.com:8443/in?token=urlsecret")
+    emit(conn)
+    route = respx.post("https://93.184.216.34:8443/in").mock(return_value=httpx.Response(200))
+
+    assert run(conn, at(10)).succeeded == 1
+
+    request = route.calls.last.request
+    assert request.url.host == "93.184.216.34"
+    assert request.url.port == 8443
+    assert request.url.params["token"] == "urlsecret"
+    assert request.headers["Host"] == "hook.example.com:8443"
+    assert request.extensions["sni_hostname"] == "hook.example.com"
+
+
+@respx.mock
+def test_ipv6_target_is_bracketed(conn: sqlite3.Connection, repo: WebhookRepo) -> None:
+    subscribe(repo)
+    emit(conn)
+    route = respx.post("https://[2606:4700::1111]/in").mock(return_value=httpx.Response(200))
+
+    assert run(conn, at(10), resolver=resolving_to("2606:4700::1111")).succeeded == 1
+
+    assert route.calls.last.request.headers["Host"] == "hook.example.com"
+
+
+@respx.mock
+def test_one_resolution_per_delivery_so_rebinding_cannot_redirect(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    subscribe(repo)
+    emit(conn)
+    calls: list[str] = []
+
+    def flipping(host: str, port: int, **_: Any) -> list[tuple[Any, ...]]:
+        calls.append(host)
+        address = "93.184.216.34" if len(calls) == 1 else "169.254.169.254"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port))]
+
+    good = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+    evil = respx.route(host="169.254.169.254").mock(return_value=httpx.Response(200))
+
+    assert run(conn, at(10), resolver=flipping).succeeded == 1
+
+    assert calls == ["hook.example.com"]
+    assert good.call_count == 1
+    assert not evil.called
+
+
+@respx.mock
+def test_ip_literal_url_sends_no_sni_override(conn: sqlite3.Connection, repo: WebhookRepo) -> None:
+    subscribe(repo, url=ENDPOINT)
+    emit(conn)
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+    assert run(conn, at(10)).succeeded == 1
+    assert "sni_hostname" not in route.calls.last.request.extensions
+
+
+# ------------------------------------------------------------------ per-attempt timestamp
+@respx.mock
+def test_timestamp_is_taken_at_each_post_not_at_pass_start(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    _, secret = subscribe(repo)
+    emit(conn, "fx.rates.published", n=1)
+    emit(conn, "fx.rates.published", n=2)
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+    # per delivery the clock is read for the POST, then for the log row
+    ticks = iter(at(t) for t in (100, 130, 160, 190))
+
+    report = dispatch_pending(
+        conn, make_settings(), now=at(10), resolver=PUBLIC, clock=lambda: next(ticks)
+    )
+
+    assert report.succeeded == 2
+    stamps = [int(c.request.headers[signing.TIMESTAMP_HEADER]) for c in route.calls]
+    assert stamps == [int(at(100).timestamp()), int(at(160).timestamp())]
+    for call, stamp in zip(route.calls, stamps, strict=True):
+        assert signing.verify(
+            secret,
+            call.request.content,
+            call.request.headers[signing.SIGNATURE_HEADER],
+            timestamp=stamp,
+            now=stamp,
+        )
+
+
+# ------------------------------------------------------------------ no double delivery
+@respx.mock
+def test_back_to_back_passes_deliver_each_event_once(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    subscribe(repo)
+    emit(conn)
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+
+    first = run(conn, at(10))
+    second = run(conn, at(10))
+
+    assert (first.succeeded, second.sent) == (1, 0)
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_concurrent_passes_on_separate_connections_deliver_once(tmp_path: Path) -> None:
+    path = tmp_path / "race.sqlite3"
+    setup = connect(path)
+    migrate(setup)
+    repo = WebhookRepo(setup)
+    sid, _ = subscribe(repo)
+    emit(setup)
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+    barrier = threading.Barrier(2)
+    reports: list[DispatchReport] = []
+
+    def worker() -> None:
+        own = connect(path)
+        try:
+            barrier.wait()
+            reports.append(run(own, at(10)))
+        finally:
+            own.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(r.sent for r in reports) == [0, 1]
+    assert route.call_count == 1
+    assert len(repo.deliveries(sid)) == 1
+    setup.close()
+
+
+@respx.mock
+def test_an_in_flight_claim_blocks_another_pass_until_it_expires(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    sid, _ = subscribe(repo)
+    emit(conn)
+    repo.claim_work(at(10))  # another dispatcher took it and has not finished
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+
+    assert run(conn, at(11)) == DispatchReport()
+    assert not route.called
+
+    # the claimer crashed: after the TTL it is a failed attempt and the pair is retried
+    assert run(conn, at(10 + IN_FLIGHT_TTL_SECONDS + 1)).succeeded == 1
+    attempts = sorted(d.attempt for d in repo.deliveries(sid))
+    assert attempts == [1, 2]
+
+
+@respx.mock
+def test_the_claim_row_is_written_before_the_request_is_sent(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    sid, _ = subscribe(repo)
+    emit(conn)
+    seen: list[tuple[str | None, int | None]] = []
+
+    def inspect(request: httpx.Request) -> httpx.Response:
+        (row,) = repo.deliveries(sid)
+        seen.append((row.error, row.status_code))
+        return httpx.Response(200)
+
+    respx.post(ENDPOINT).mock(side_effect=inspect)
+    run(conn, at(10))
+
+    assert seen == [(ERROR_IN_FLIGHT, None)]
+    (done,) = repo.deliveries(sid)
+    assert (done.error, done.succeeded) == (None, True)
+
+
+@respx.mock
+def test_deleted_subscription_with_no_secret_is_not_sent(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    sid, _ = subscribe(repo)
+    emit(conn)
+    claims = repo.claim_work(at(10))  # claimed, then deleted before the send
+    repo.deactivate(sid)
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+    assert len(claims) == 1
+
+    # a pass that picks it up after expiry finds nothing: the subscription is inactive
+    assert run(conn, at(10_000)) == DispatchReport()
+    assert not route.called
+
+
+@respx.mock
+def test_empty_secret_at_send_time_is_skipped_and_recorded(
+    conn: sqlite3.Connection, repo: WebhookRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sid, _ = subscribe(repo)
+    emit(conn)
+    route = respx.post(ENDPOINT).mock(return_value=httpx.Response(200))
+    monkeypatch.setattr(WebhookRepo, "get_secret", lambda self, _id: "")
+
+    report = run(conn, at(10))
+
+    assert report == DispatchReport(skipped_unsafe=1)
+    assert not route.called
+    (delivery,) = repo.deliveries(sid)
+    assert delivery.error == ERROR_UNSAFE_URL
+
+
+def test_without_now_or_clock_the_real_utc_clock_is_used(conn: sqlite3.Connection) -> None:
+    assert dispatch_pending(conn, make_settings(), resolver=PUBLIC) == DispatchReport()

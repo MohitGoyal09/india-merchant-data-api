@@ -7,9 +7,10 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from imda.api.deps import Ctx, IsoDate, check_range
+from imda.api.deps import Ctx, IsoDate
 from imda.api.envelope import Used, envelope_example, success
 from imda.api.serialize import mibor_view
+from imda.domain.fx_service import check_range
 from imda.models import Dataset, Source
 
 router = APIRouter(prefix="/v1/rates", tags=["mibor"])
@@ -60,5 +61,5 @@ def mibor(
     rows = ctx.store.mibor(from_, to)
     if overnight_only:
         rows = [r for r in rows if r.tenor in OVERNIGHT_TENORS]
-    used = [Used(Source.FBIL, Dataset.MIBOR, ctx.store.latest_mibor_date())] if rows else []
+    used = [Used(Source.FBIL, Dataset.MIBOR, ctx.store.latest_mibor_date())]
     return success(ctx, [mibor_view(r) for r in rows], used=used)

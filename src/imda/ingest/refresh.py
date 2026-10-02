@@ -11,6 +11,7 @@ from imda.ingest.loaders import (
     FBIL_MIBOR_START,
     HOLIDAYS_FIRST_YEAR,
     HolidayContext,
+    count_changes,
     floored_range,
     latest_fx,
     load_fx,
@@ -20,7 +21,6 @@ from imda.ingest.loaders import (
     load_offices,
     prepare_holidays,
     rbi_fx_ranges,
-    record_holiday_event,
     year_loaded,
 )
 from imda.models import Dataset, Source
@@ -88,7 +88,7 @@ def _refresh_holidays(env: RunEnv) -> TaskOutput:
         months = [m for m in months if m[0] != env.today.year]
     for year, month in months:
         diffs, last = load_holiday_month(ctx, year, month)
-        rows += record_holiday_event(env, f"{year}-{month:02d}", [diffs])
+        rows += count_changes([diffs])
     if last is None:
         return TaskOutput(rows=0, skipped=True)
     return TaskOutput(rows=rows, fingerprint=ctx.adapter.fingerprint(last))

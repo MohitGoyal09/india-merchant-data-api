@@ -83,3 +83,13 @@ def test_degraded_source_sets_meta_flag_and_warning(client: TestClient, store: S
     assert parsed["meta"]["degraded"] is True
     assert any("rbi/holidays is degraded" in w for w in parsed["meta"]["warnings"])
     assert parsed["meta"]["count"] == 22  # last good data is still served
+
+
+def test_month_with_no_holidays_still_has_provenance(client: TestClient) -> None:
+    parsed = body(client.get("/v1/holidays?office=mumbai&year=2026&month=7"))
+
+    assert parsed["data"] == []
+    (entry,) = parsed["provenance"]
+    assert (entry["source"], entry["dataset"]) == ("rbi", "holidays")
+    assert entry["source_url"].startswith("https://www.rbi.org.in/")
+    assert entry["fetched_at"] is not None

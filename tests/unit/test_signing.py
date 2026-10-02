@@ -83,3 +83,13 @@ def test_verify_uses_constant_time_compare(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(signing.hmac, "compare_digest", spy)
     assert signing.verify(SECRET, BODY, signing.sign(SECRET, BODY, TS), timestamp=TS, now=TS)
     assert len(calls) == 1
+
+
+def test_sign_refuses_an_empty_secret() -> None:
+    with pytest.raises(ValueError, match="secret"):
+        signing.sign("", BODY, TS)
+
+
+def test_verify_is_false_for_an_empty_secret() -> None:
+    forged = hmac.new(b"", f"{TS}.".encode() + BODY, hashlib.sha256).hexdigest()
+    assert signing.verify("", BODY, forged, timestamp=TS, now=TS) is False

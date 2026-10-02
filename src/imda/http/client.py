@@ -3,10 +3,11 @@
 Politeness rules (docs/PLAN.md section 7), all enforced here and nowhere else:
 
 - kill switch (``IMDA_UPSTREAM_ENABLED=false``) and a hard per-instance request budget
-- at least ``min_interval_seconds`` between consecutive attempts to the same host
-- an honest User-Agent, no redirects followed, a fixed timeout
-- retries with full-jitter exponential backoff on 429, 5xx, timeouts and transport errors,
-  honouring ``Retry-After`` (capped)
+- at least ``min_interval_seconds`` between the end of one attempt and the start of the next
+  to the same host
+- an honest User-Agent, no redirects followed, a fixed timeout, a response size cap
+- retries with full-jitter exponential backoff on 429, 5xx and any ``httpx`` error (timeouts,
+  transport and decoding errors), honouring ``Retry-After`` (capped)
 - a per-host circuit breaker
 
 Clock, sleep and RNG are injected so every timing rule is testable without waiting.
@@ -180,7 +181,6 @@ class PoliteClient:
             remaining = last + self._settings.min_interval_seconds - self._clock()
             if remaining > 0:
                 self._sleep(remaining)
-        self._last_attempt[host] = self._clock()
 
     def _delay(self, attempt: int, retry_after: float | None) -> float:
         cap = self._settings.backoff_max_seconds
@@ -192,25 +192,34 @@ class PoliteClient:
     # -- one attempt ----------------------------------------------------------------------
 
     def _attempt(self, request: UpstreamRequest, attempt: int) -> RawPayload | _Failure:
+        host = httpx.URL(request.url).host
         started = self._clock()
         try:
-            response = self._http.request(
-                request.method,
-                request.url,
-                params=dict(request.params) or None,
-                data=dict(request.form) if request.form is not None else None,
-                headers=dict(request.headers),
-            )
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            return self._exchange(request, attempt, started)
+        except httpx.HTTPError as exc:
             message = f"{type(exc).__name__}: {exc}"
             self._emit(request, attempt, None, b"", started, message)
             return _Failure(message, None, None)
+        finally:
+            # Pacing counts from the end of an attempt, so a slow response is not "free" time.
+            self._last_attempt[host] = self._clock()
 
-        status = response.status_code
-        error = None if response.is_success else _describe(status)
-        self._emit(request, attempt, status, response.content, started, error)
+    def _exchange(
+        self, request: UpstreamRequest, attempt: int, started: float
+    ) -> RawPayload | _Failure:
+        with self._http.stream(
+            request.method,
+            request.url,
+            params=dict(request.params) or None,
+            data=dict(request.form) if request.form is not None else None,
+            headers=dict(request.headers),
+        ) as response:
+            status = response.status_code
+            body = self._read_capped(response, request, attempt, started)
+        error = None if 200 <= status < 300 else _describe(status)
+        self._emit(request, attempt, status, body, started, error)
         if error is None:
-            return self._payload(request, response, started)
+            return self._payload(request, status, response, body, started)
         if status in _RETRYABLE_STATUS:
             retry_after = parse_retry_after(
                 response.headers.get("retry-after"), dt.datetime.now(dt.UTC)
@@ -218,16 +227,41 @@ class PoliteClient:
             return _Failure(error, status, retry_after)
         raise UpstreamError(error, url=request.url, status_code=status)
 
+    def _read_capped(
+        self, response: httpx.Response, request: UpstreamRequest, attempt: int, started: float
+    ) -> bytes:
+        """Read the decoded body; over the cap is a non-retried ``UpstreamError``."""
+        cap = self._settings.max_response_bytes
+        declared = _content_length(response)
+        chunks: list[bytes] = []
+        total = 0
+        if declared is None or declared <= cap:
+            for chunk in response.iter_bytes():
+                total += len(chunk)
+                if total > cap:
+                    break
+                chunks.append(chunk)
+            else:
+                return b"".join(chunks)
+        message = f"response exceeds {cap} bytes"
+        self._emit(request, attempt, response.status_code, b"".join(chunks), started, message)
+        raise UpstreamError(message, url=request.url, status_code=response.status_code)
+
     def _payload(
-        self, request: UpstreamRequest, response: httpx.Response, started: float
+        self,
+        request: UpstreamRequest,
+        status: int,
+        response: httpx.Response,
+        body: bytes,
+        started: float,
     ) -> RawPayload:
         return RawPayload(
             request=request,
-            status_code=response.status_code,
-            body=response.content,
+            status_code=status,
+            body=body,
             content_type=response.headers.get("content-type", ""),
             fetched_at=dt.datetime.now(dt.UTC),
-            sha256=hashlib.sha256(response.content).hexdigest(),
+            sha256=hashlib.sha256(body).hexdigest(),
             duration_ms=self._elapsed_ms(started),
         )
 
@@ -257,6 +291,13 @@ class PoliteClient:
 
     def _elapsed_ms(self, started: float) -> int:
         return round((self._clock() - started) * 1000)
+
+
+def _content_length(response: httpx.Response) -> int | None:
+    try:
+        return int(response.headers["content-length"])
+    except (KeyError, ValueError):
+        return None
 
 
 def _describe(status: int) -> str:

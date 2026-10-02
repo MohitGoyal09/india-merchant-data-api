@@ -14,29 +14,39 @@ from typing import Annotated, Any
 from fastapi import Depends, Request
 from pydantic import BeforeValidator
 
-from imda.api.errors import office_not_found, range_too_large
+from imda.api.errors import office_not_found, store_unavailable
 from imda.config import Settings
 from imda.domain.calendar import HolidayCalendar
-from imda.domain.fx_service import MAX_RANGE_DAYS, FxService
+from imda.domain.fx_service import INR as INR_CODE
+from imda.domain.fx_service import FxService
 from imda.models import IST, Currency
-from imda.store.repo import Store
+from imda.store.repo import Store, StoreUnavailable
 
 CALENDAR_TTL_SECONDS = 60.0
+MIN_API_DATE = dt.date(2000, 1, 1)
+MAX_API_DATE = dt.date(2100, 12, 31)
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _AMOUNT = re.compile(r"^[+-]?\d{1,18}(\.\d{1,18})?$")
 _SPACE_BEFORE_OFFSET = re.compile(r"(?<=\d) (?=\d{2}:\d{2}$)")
 
 
+def _in_api_bounds(day: dt.date) -> dt.date:
+    if not MIN_API_DATE <= day <= MAX_API_DATE:
+        raise ValueError(f"date must be between {MIN_API_DATE} and {MAX_API_DATE}")
+    return day
+
+
 def _strict_iso_date(value: Any) -> dt.date:
     if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
-        return value
+        return _in_api_bounds(value)
     if not isinstance(value, str) or not _ISO_DATE.fullmatch(value):
         raise ValueError("invalid ISO date: expected YYYY-MM-DD")
     try:
-        return dt.date.fromisoformat(value)
+        parsed = dt.date.fromisoformat(value)
     except ValueError:
         raise ValueError("invalid ISO date: not a real calendar date") from None
+    return _in_api_bounds(parsed)
 
 
 def _aware_datetime(value: Any) -> dt.datetime:
@@ -69,6 +79,14 @@ def _currency(value: Any) -> Any:
     return value.strip().upper() if isinstance(value, str) else value
 
 
+def _convert_currency(value: Any) -> Any:
+    code = _currency(value)
+    if code == INR_CODE or (isinstance(code, str) and code in Currency):
+        return code
+    allowed = ", ".join([INR_CODE, *(c.value for c in Currency)])
+    raise ValueError(f"unsupported currency: use one of {allowed}")
+
+
 def _slug(value: Any) -> Any:
     return value.strip().lower() if isinstance(value, str) else value
 
@@ -77,16 +95,8 @@ IsoDate = Annotated[dt.date, BeforeValidator(_strict_iso_date)]
 AwareDatetime = Annotated[dt.datetime, BeforeValidator(_aware_datetime)]
 AmountText = Annotated[Decimal, BeforeValidator(_amount)]
 CurrencyCode = Annotated[Currency, BeforeValidator(_currency)]
+ConvertCurrency = Annotated[str, BeforeValidator(_convert_currency)]
 OfficeSlug = Annotated[str, BeforeValidator(_slug)]
-
-
-def check_range(start: dt.date, end: dt.date) -> None:
-    """``from`` must not be after ``to``, and the span is capped at ``MAX_RANGE_DAYS``."""
-    if start > end:
-        raise ValueError(f"`from` ({start}) must not be later than `to` ({end})")
-    days = (end - start).days
-    if days > MAX_RANGE_DAYS:
-        raise range_too_large(days, MAX_RANGE_DAYS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +170,10 @@ def get_context(request: Request) -> Iterator[RequestContext]:
     state = request.app.state
     settings: Settings = state.settings
     now: Callable[[], dt.datetime] = state.now
-    store = Store.open(settings.db_path)
+    try:
+        store = Store.open(settings.db_path, read_only=True)
+    except StoreUnavailable:
+        raise store_unavailable() from None
     try:
         snapshot = state.snapshots.get(store)
         fx = FxService(store, calendar=snapshot.calendar, settings=settings, now=now)
@@ -180,14 +193,16 @@ def get_context(request: Request) -> Iterator[RequestContext]:
 Ctx = Annotated[RequestContext, Depends(get_context)]
 
 __all__ = [
+    "MAX_API_DATE",
+    "MIN_API_DATE",
     "AmountText",
     "AwareDatetime",
+    "ConvertCurrency",
     "Ctx",
     "CurrencyCode",
     "IsoDate",
     "OfficeSlug",
     "RequestContext",
     "SnapshotCache",
-    "check_range",
     "get_context",
 ]

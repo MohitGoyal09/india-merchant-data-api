@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from imda import __version__
 
@@ -26,14 +26,11 @@ LINKS = {
 
 
 @router.get("/", summary="Service links")
-def index() -> dict[str, object]:
-    return {
-        "name": "India Merchant Data API",
-        "version": __version__,
-        "docs": "/docs",
-        "openapi": "/openapi.json",
-        "endpoints": LINKS,
-    }
+def index(request: Request) -> dict[str, object]:
+    info: dict[str, object] = {"name": "India Merchant Data API", "version": __version__}
+    if request.app.state.settings.enable_docs:
+        info |= {"docs": "/docs", "openapi": "/openapi.json"}
+    return info | {"endpoints": LINKS}
 
 
 @router.get("/healthz", summary="Liveness (no database access)")

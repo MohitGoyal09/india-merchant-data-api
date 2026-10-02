@@ -15,7 +15,7 @@ from imda.api.serialize import conversion_view, settlement_view
 from imda.domain.fx_service import SourceChoice
 from imda.domain.invoice import quote_invoice
 from imda.domain.settlement import SettlementMode
-from imda.models import Currency, Dataset, Source
+from imda.models import Dataset, Source
 
 router = APIRouter(prefix="/v1/invoice", tags=["invoice"])
 
@@ -82,7 +82,7 @@ def quote(ctx: Ctx, body: InvoiceQuoteRequest) -> JSONResponse:
     cycle = ctx.settings.settlement_cycle_days if body.cycle_days is None else body.cycle_days
     result = quote_invoice(
         amount=body.amount,
-        currency=Currency(body.currency),
+        currency=body.currency,
         invoice_date=body.invoice_date,
         office=body.office,
         fx=ctx.fx,

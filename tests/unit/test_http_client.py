@@ -170,8 +170,19 @@ def test_waits_min_interval_between_requests_to_same_host() -> None:
     client.send(REQ)
     client.send(REQ)
 
-    assert script.call_times[1] - script.call_times[0] == pytest.approx(2.0)
-    assert ft.sleeps == [pytest.approx(1.5)]
+    # pacing counts from the END of the previous attempt: 0.5 s response + 2 s interval
+    assert script.call_times[1] - script.call_times[0] == pytest.approx(2.5)
+    assert ft.sleeps == [pytest.approx(2.0)]
+
+
+def test_pacing_counts_from_the_end_of_a_slow_failed_attempt() -> None:
+    client, script, _, _ = build([httpx.Response(404)], takes=5.0, max_attempts=1)
+
+    for _ in range(2):
+        with pytest.raises(UpstreamError):
+            client.send(REQ)
+
+    assert script.call_times[1] - script.call_times[0] == pytest.approx(7.0)
 
 
 def test_no_wait_when_interval_already_elapsed_or_different_host() -> None:
@@ -448,3 +459,115 @@ def test_defaults_construct_without_injection() -> None:
     with pytest.raises(UpstreamError):
         client.send(REQ)
     client.close()
+
+
+# ---------------------------------------------------------------- decoding errors
+def _bad_gzip() -> httpx.Response:
+    # a stream (not ``content=``) so the decoding error surfaces while the client reads it
+    return httpx.Response(
+        200, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip")
+    )
+
+
+def test_bad_content_encoding_is_a_retryable_failure_then_upstream_error() -> None:
+    bad = _bad_gzip()
+    events: list[ExchangeEvent] = []
+    client, script, _, _ = build([bad, _bad_gzip(), _bad_gzip()], events=events, max_attempts=3)
+
+    with pytest.raises(UpstreamError, match="giving up after 3 attempts") as exc:
+        client.send(REQ)
+
+    assert len(script.calls) == 3
+    assert exc.value.status_code is None
+    assert all(e.error is not None and "DecodingError" in e.error for e in events)
+
+
+def test_decoding_error_then_success_recovers() -> None:
+    bad = _bad_gzip()
+    client, script, _, _ = build([bad, ok(b"[1]")])
+
+    assert client.send(REQ).body == b"[1]"
+    assert len(script.calls) == 2
+
+
+def test_any_httpx_error_is_retryable() -> None:
+    client, script, _, _ = build([httpx.TooManyRedirects("loop"), ok()])
+
+    assert client.send(REQ).status_code == 200
+    assert len(script.calls) == 2
+
+
+# ---------------------------------------------------------------- response size cap
+class _Chunks(httpx.SyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+        self.read = 0
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        for chunk in self.chunks:
+            self.read += 1
+            yield chunk
+
+
+def test_response_over_cap_is_rejected_without_retry() -> None:
+    events: list[ExchangeEvent] = []
+    client, script, _, _ = build(
+        [ok(b"x" * 2000)], events=events, max_response_bytes=1024, max_attempts=4
+    )
+
+    with pytest.raises(UpstreamError, match="response exceeds 1024 bytes") as exc:
+        client.send(REQ)
+
+    assert len(script.calls) == 1
+    assert exc.value.url == URL
+    [event] = events
+    assert event.error is not None
+    assert "exceeds 1024 bytes" in event.error
+
+
+def test_streamed_body_over_cap_stops_reading_early() -> None:
+    stream = _Chunks([b"x" * 600] * 50)
+    client, _, _, _ = build(
+        [httpx.Response(200, stream=stream)], max_response_bytes=1024, max_attempts=1
+    )
+
+    with pytest.raises(UpstreamError, match="exceeds 1024 bytes"):
+        client.send(REQ)
+
+    assert stream.read == 2  # 600, then 1200 > 1024: stop
+
+
+def test_content_length_over_cap_is_rejected_before_reading() -> None:
+    stream = _Chunks([b"x"])
+    response = httpx.Response(200, headers={"content-length": "5000"}, stream=stream)
+    client, _, _, _ = build([response], max_response_bytes=1024)
+
+    with pytest.raises(UpstreamError, match="exceeds 1024 bytes"):
+        client.send(REQ)
+
+    assert stream.read == 0
+
+
+def test_garbage_content_length_header_is_ignored() -> None:
+    stream = _Chunks([b"[1]"])
+    response = httpx.Response(200, headers={"content-length": "abc"}, stream=stream)
+    client, _, _, _ = build([response])
+
+    assert client.send(REQ).body == b"[1]"
+
+
+def test_body_exactly_at_cap_is_accepted() -> None:
+    client, _, _, _ = build([ok(b"x" * 1024)], max_response_bytes=1024)
+
+    assert len(client.send(REQ).body) == 1024
+
+
+def test_oversized_error_body_is_also_capped() -> None:
+    client, script, _, _ = build(
+        [httpx.Response(503, content=b"x" * 2000)], max_response_bytes=1024
+    )
+
+    with pytest.raises(UpstreamError, match="exceeds 1024 bytes"):
+        client.send(REQ)
+
+    assert len(script.calls) == 1

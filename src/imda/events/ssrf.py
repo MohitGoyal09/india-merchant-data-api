@@ -1,12 +1,14 @@
 """SSRF guard for webhook target URLs.
 
-``validate_webhook_url`` is called twice: when a subscription is created, and again right
-before every delivery (DNS can change between the two, a "DNS rebinding" attack).
+``validate_webhook_url`` runs when a subscription is created. ``resolve_webhook_url`` runs
+right before every delivery (DNS can change in between, a "DNS rebinding" attack) and returns
+the validated addresses; the delivery then connects to the first of those addresses
+(``ResolvedUrl.pin``) instead of resolving the name again, so the checked answer is the one
+used. TLS still verifies the original host name (SNI) and ``Host`` stays the original one.
 
-Residual risk: the HTTP client resolves the name again when it connects, so a resolver that
-flips between our check and the connect can still slip through. Deliveries never follow
-redirects, send no cookies or credentials, and expose no response body to the subscriber.
-Production deployments should also block private ranges at the network egress layer.
+Deliveries never follow redirects, send no cookies or credentials, and expose no response
+body to the subscriber. Production deployments should also block private ranges at the
+network egress layer.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -76,10 +79,74 @@ def _resolve(host: str, port: int, resolver: Resolver) -> list[IPAddress]:
     return addresses
 
 
+@dataclass(frozen=True, slots=True)
+class PinnedTarget:
+    """Where to send a request so that the validated address, not a new DNS answer, is used."""
+
+    url: str
+    """The URL with the validated IP literal as host."""
+    host_header: str
+    """Value for the ``Host`` header: the original host (and port, if one was given)."""
+    sni_hostname: str | None
+    """Host name for TLS SNI and certificate checks; ``None`` when the URL host is an IP."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedUrl:
+    """A normalized URL plus the addresses that passed the checks (one resolution)."""
+
+    url: str
+    host: str
+    addresses: tuple[IPAddress, ...]
+
+    def pin(self) -> PinnedTarget:
+        """Target the first validated address. TLS and ``Host`` keep the original name."""
+        parts = urlsplit(self.url)
+        address = self.addresses[0]
+        literal = f"[{address}]" if isinstance(address, ipaddress.IPv6Address) else str(address)
+        if parts.port is not None:
+            literal = f"{literal}:{parts.port}"
+        pinned = urlunsplit((parts.scheme, literal, parts.path, parts.query, ""))
+        is_ip_host = _is_ip_literal(self.host)
+        return PinnedTarget(
+            url=pinned,
+            host_header=parts.netloc,
+            sni_hostname=None if is_ip_host else self.host,
+        )
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def redact_url(url: str) -> str:
+    """``scheme://host/…``: enough to recognise a subscription, nothing a path or query holds."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return "…"
+    if not parts.scheme or not host:
+        return "…"
+    shown = f"[{host}]" if ":" in host else host
+    return f"{parts.scheme}://{shown}/…"
+
+
 def validate_webhook_url(
     url: str, *, allow_private: bool, resolver: Resolver = socket.getaddrinfo
 ) -> str:
-    """Return the normalized URL, or raise ``UnsafeWebhookUrl``.
+    """Return the normalized URL, or raise ``UnsafeWebhookUrl`` (see ``resolve_webhook_url``)."""
+    return resolve_webhook_url(url, allow_private=allow_private, resolver=resolver).url
+
+
+def resolve_webhook_url(
+    url: str, *, allow_private: bool, resolver: Resolver = socket.getaddrinfo
+) -> ResolvedUrl:
+    """Validate ``url`` with ONE DNS resolution; return the URL and the validated addresses.
 
     Rules: at most 2048 chars; no whitespace or control characters; ``https`` only (``http``
     too when ``allow_private``); a host is required; no ``user:pass@``; every resolved address
@@ -115,4 +182,5 @@ def validate_webhook_url(
     netloc = f"[{host}]" if ":" in host else host
     if port is not None:
         netloc = f"{netloc}:{port}"
-    return urlunsplit((scheme, netloc, parts.path, parts.query, ""))
+    normalized = urlunsplit((scheme, netloc, parts.path, parts.query, ""))
+    return ResolvedUrl(url=normalized, host=host, addresses=tuple(addresses))

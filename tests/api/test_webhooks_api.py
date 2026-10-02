@@ -195,3 +195,45 @@ def test_deliveries_limit_is_validated(api: TestClient, limit: str) -> None:
     sub_id = str(create(api)["id"])
     response = api.get(f"/v1/webhooks/{sub_id}/deliveries?limit={limit}", headers=HEADERS)
     assert_error(response, 422, "INVALID_REQUEST")
+
+
+def test_deliveries_show_only_a_coarse_error_class(api: TestClient, store: Store) -> None:
+    sub_id = str(create(api)["id"])
+    repo = WebhookRepo(store.connection)
+    event_id = store.record_event("fx.rates.published", {"n": 1})
+    leaks = [
+        (None, "ConnectError: [Errno 111] Connection refused 10.0.0.5:22"),
+        (500, "HTTP 500"),
+        (None, "ReadTimeout"),
+        (None, "in_flight"),
+        (None, "unsafe_url"),
+    ]
+    for attempt, (status, error) in enumerate(leaks, start=1):
+        repo.record_delivery(
+            sub_id, event_id, attempt=attempt, succeeded=False, status_code=status, error=error
+        )
+
+    rows = body(api.get(f"/v1/webhooks/{sub_id}/deliveries", headers=HEADERS))["data"]
+
+    assert [(r["status_code"], r["error"]) for r in reversed(rows)] == [
+        (None, "connect_error"),
+        (500, "http_status"),
+        (None, "timeout"),
+        (None, "in_flight"),
+        (None, "unsafe_url"),
+    ]
+
+
+def test_delete_erases_the_secret_and_redacts_the_url(api: TestClient, store: Store) -> None:
+    created = create(api)
+    sub_id = str(created["id"])
+
+    assert api.delete(f"/v1/webhooks/{sub_id}", headers=HEADERS).status_code == 204
+
+    repo = WebhookRepo(store.connection)
+    assert repo.get_secret(sub_id) == ""
+    (stored,) = repo.list_subscriptions(include_inactive=True)
+    assert stored.url == "https://93.184.216.34/…"
+    assert str(created["secret"]) not in str(
+        store.connection.execute("SELECT * FROM webhook_subscriptions").fetchall()[0][:]
+    )

@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from imda.api.serialize import to_jsonable
 from imda.domain.calendar import CalendarDataMissing
 from imda.domain.fx_service import RateNotFound
+from imda.errors import InvalidInput, RangeTooLarge
 
 logger = logging.getLogger("imda.api")
 
@@ -59,13 +60,27 @@ def office_not_found(slug: str) -> ApiError:
     return ApiError(404, "OFFICE_NOT_FOUND", f"Unknown RBI office {slug!r}", {"office": slug})
 
 
-def range_too_large(days: int, limit: int) -> ApiError:
+def store_unavailable() -> ApiError:
     return ApiError(
-        422,
-        "RANGE_TOO_LARGE",
-        f"Range of {days} days exceeds the {limit}-day limit",
-        {"days": days, "max_days": limit},
+        503,
+        "STORE_UNAVAILABLE",
+        "The data store is missing or not set up: run `imda backfill` first",
     )
+
+
+def payload_too_large(limit: int) -> ApiError:
+    return ApiError(
+        413,
+        "PAYLOAD_TOO_LARGE",
+        f"Request body exceeds the {limit}-byte limit",
+        {"max_bytes": limit},
+    )
+
+
+def invalid_request(location: str, name: str, message: str) -> ApiError:
+    """A 422 INVALID_REQUEST shaped like a framework validation error for one parameter."""
+    error = {"field": name, "in": location, "message": message, "type": "value_error"}
+    return ApiError(422, "INVALID_REQUEST", "Request validation failed", {"errors": [error]})
 
 
 def request_id_of(request: Request) -> str:
@@ -118,8 +133,20 @@ def _on_request_validation(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-def _on_value_error(request: Request, exc: Exception) -> JSONResponse:
+def _on_invalid_input(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, InvalidInput)
     return error_response(request, 422, "VALIDATION_ERROR", str(exc))
+
+
+def _on_range_too_large(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, RangeTooLarge)
+    return error_response(
+        request,
+        422,
+        "RANGE_TOO_LARGE",
+        str(exc),
+        {"days": exc.days, "max_days": exc.limit},
+    )
 
 
 def _on_rate_not_found(request: Request, exc: Exception) -> JSONResponse:
@@ -168,13 +195,16 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(RequestValidationError, _on_request_validation)
     app.add_exception_handler(RateNotFound, _on_rate_not_found)
     app.add_exception_handler(CalendarDataMissing, _on_calendar_missing)
-    app.add_exception_handler(ValueError, _on_value_error)
+    app.add_exception_handler(InvalidInput, _on_invalid_input)
+    app.add_exception_handler(RangeTooLarge, _on_range_too_large)
     app.add_exception_handler(StarletteHTTPException, _on_http_exception)
 
 
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorEnvelope, "description": "Unknown office, route or rate"},
     409: {"model": ErrorEnvelope, "description": "Holiday data for that year is not loaded"},
+    413: {"model": ErrorEnvelope, "description": "Request body too large"},
     422: {"model": ErrorEnvelope, "description": "Invalid request"},
     500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+    503: {"model": ErrorEnvelope, "description": "The data store is not set up"},
 }

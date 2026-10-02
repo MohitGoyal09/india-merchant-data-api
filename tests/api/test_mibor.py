@@ -48,11 +48,14 @@ def test_overnight_only_filters_other_tenors(client: TestClient, store: Store) -
     assert FETCHED_AT  # fixture timestamp is shared with the seed
 
 
-def test_empty_range_has_no_provenance(client: TestClient) -> None:
+def test_empty_range_still_has_provenance(client: TestClient) -> None:
     parsed = body(client.get(f"{URL}?from=2020-01-01&to=2020-01-31"))
 
     assert parsed["data"] == []
-    assert parsed["provenance"] == []
+    (entry,) = parsed["provenance"]
+    assert (entry["source"], entry["dataset"]) == ("fbil", "mibor_overnight")
+    assert entry["source_url"].startswith("https://")
+    assert entry["fetched_at"] is not None
 
 
 def test_validation(client: TestClient) -> None:

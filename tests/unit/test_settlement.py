@@ -8,6 +8,7 @@ import pytest
 
 from imda.domain.calendar import CalendarDataMissing, HolidayCalendar, SkippedDay
 from imda.domain.settlement import SettlementMode, estimate_settlement
+from imda.errors import InvalidInput
 from imda.models import IST, Holiday, HolidayKind
 
 D = dt.date
@@ -129,11 +130,11 @@ class TestWorkingDays:
 
 class TestErrors:
     def test_naive_datetime_rejected(self) -> None:
-        with pytest.raises(ValueError, match="timezone"):
+        with pytest.raises(InvalidInput, match="timezone"):
             estimate_settlement(dt.datetime(2026, 3, 27, 12), MUM, 2, mumbai_2026())
 
     def test_negative_cycle_rejected(self) -> None:
-        with pytest.raises(ValueError, match="cycle_days"):
+        with pytest.raises(InvalidInput, match="cycle_days"):
             estimate_settlement(ist(2026, 3, 27), MUM, -1, mumbai_2026())
 
     def test_missing_year_raises(self) -> None:
@@ -146,5 +147,5 @@ class TestErrors:
             estimate_settlement(ist(2026, 3, 27), "atlantis", 2, mumbai_2026())
 
     def test_unknown_mode_rejected(self) -> None:
-        with pytest.raises(ValueError, match="mode"):
+        with pytest.raises(InvalidInput, match="mode"):
             estimate_settlement(ist(2026, 3, 27), MUM, 2, mumbai_2026(), "bogus")  # type: ignore[arg-type]

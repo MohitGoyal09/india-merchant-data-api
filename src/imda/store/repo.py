@@ -11,7 +11,8 @@ import datetime as dt
 import json
 import sqlite3
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -32,11 +33,16 @@ from imda.models import (
     SourceStatus,
 )
 from imda.sources.base import UpstreamRequest
-from imda.store.db import connect, migrate
+from imda.store.db import connect, is_migrated
+from imda.store.db import migrate as migrate_schema
 
 RunKind = Literal["backfill", "refresh", "canary"]
 RunStatus = Literal["running", "ok", "partial", "failed"]
 Row = dict[str, object]
+
+
+class StoreUnavailable(RuntimeError):
+    """The database cannot be opened read-only: the file is missing or not migrated."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,10 +113,44 @@ class Store:
         self._conn = conn
 
     @classmethod
-    def open(cls, path: Path) -> Self:
-        conn = connect(path)
-        migrate(conn)
+    def open(cls, path: Path, *, migrate: bool = True, read_only: bool = False) -> Self:
+        """Open the database.
+
+        ``read_only`` never creates, migrates or writes (use it for request handling): it
+        raises ``StoreUnavailable`` when the file is missing or not migrated. Otherwise the
+        schema is applied unless ``migrate`` is false.
+        """
+        if read_only and not path.is_file():
+            raise StoreUnavailable(f"database {path} does not exist")
+        conn = connect(path, read_only=read_only)
+        try:
+            if read_only:
+                if not is_migrated(conn):
+                    raise StoreUnavailable(f"database {path} is not migrated")
+            elif migrate:
+                migrate_schema(conn)
+        except BaseException:
+            conn.close()
+            raise
         return cls(conn)
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """``BEGIN IMMEDIATE`` ... ``COMMIT`` (``ROLLBACK`` on error); re-entrant.
+
+        Taking the write lock up front means a read-then-write method cannot be starved by a
+        concurrent writer between its read and its write. A nested call joins the outer one.
+        """
+        if self._conn.in_transaction:
+            yield self._conn
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield self._conn
+        except BaseException:
+            self._conn.rollback()
+            raise
+        self._conn.commit()
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -222,14 +262,14 @@ class Store:
     def upsert_offices(self, offices: Iterable[Office], fetch_id: str) -> int:
         """Insert new offices and update changed ones. Returns the new or changed count."""
         count = 0
-        with self._conn:
+        with self.transaction() as conn:
             for office in offices:
-                row = self._conn.execute(
+                row = conn.execute(
                     "SELECT rbi_id, name, state FROM offices WHERE slug = ?", (office.slug,)
                 ).fetchone()
                 if row is not None and tuple(row) == (office.rbi_id, office.name, office.state):
                     continue
-                self._conn.execute(
+                conn.execute(
                     "INSERT INTO offices (slug, rbi_id, name, state, fetch_id)"
                     " VALUES (?, ?, ?, ?, ?) ON CONFLICT (slug) DO UPDATE SET"
                     " rbi_id = excluded.rbi_id, name = excluded.name, state = excluded.state,"
@@ -267,7 +307,7 @@ class Store:
 
     def mark_holiday_year_loaded(self, office_slug: str, year: int, fetch_id: str) -> None:
         """Call after all 12 months of ``year`` were replaced successfully."""
-        with self._conn:
+        with self.transaction():
             self._mark_year(office_slug, year, fetch_id)
 
     def _mark_year(self, office_slug: str, year: int, fetch_id: str) -> None:
@@ -278,6 +318,34 @@ class Store:
             (office_slug, year, _now(), fetch_id),
         )
 
+    def replace_holiday_month_all(
+        self,
+        year: int,
+        month: int,
+        holidays_by_office: Mapping[str, Sequence[Holiday]],
+        fetch_id: str,
+    ) -> dict[str, HolidayDiff]:
+        """Replace one month for every office in ONE transaction.
+
+        Any failure (unknown office, foreign row, database error) writes nothing for the
+        month. ``holidays.updated`` is recorded in the same transaction when anything changed.
+        """
+        low, high = _month_bounds(year, month)
+        with self.transaction():
+            diffs = {
+                slug: self._replace_in_transaction(slug, low, high, found, fetch_id)
+                for slug, found in holidays_by_office.items()
+            }
+            counts = {
+                slug: {"added": len(d.added), "removed": len(d.removed)}
+                for slug, d in diffs.items()
+                if d.added or d.removed
+            }
+            if counts:
+                period = f"{year:04d}-{month:02d}"
+                self.record_event("holidays.updated", {"period": period, "offices": counts})
+        return diffs
+
     def _replace(
         self,
         office_slug: str,
@@ -287,28 +355,33 @@ class Store:
         fetch_id: str,
         mark_year: int | None,
     ) -> HolidayDiff:
-        self._require_office(office_slug)
-        incoming = _holiday_set(office_slug, low, high, holidays)
-        with self._conn:
-            rows = self._conn.execute(
-                "SELECT * FROM holidays WHERE office_slug = ? AND date BETWEEN ? AND ?",
-                (office_slug, low, high),
-            ).fetchall()
-            existing = {_holiday_key(h): h for h in map(_holiday_from_row, rows)}
-            self._conn.execute(
-                "DELETE FROM holidays WHERE office_slug = ? AND date BETWEEN ? AND ?",
-                (office_slug, low, high),
-            )
-            self._conn.executemany(
-                "INSERT INTO holidays (office_slug, date, name, kind, fetch_id)"
-                " VALUES (?, ?, ?, ?, ?)",
-                [
-                    (h.office_slug, h.date.isoformat(), h.name, h.kind.value, fetch_id)
-                    for h in incoming.values()
-                ],
-            )
+        with self.transaction():
+            diff = self._replace_in_transaction(office_slug, low, high, holidays, fetch_id)
             if mark_year is not None:
                 self._mark_year(office_slug, mark_year, fetch_id)
+        return diff
+
+    def _replace_in_transaction(
+        self, office_slug: str, low: str, high: str, holidays: Sequence[Holiday], fetch_id: str
+    ) -> HolidayDiff:
+        self._require_office(office_slug)
+        incoming = _holiday_set(office_slug, low, high, holidays)
+        rows = self._conn.execute(
+            "SELECT * FROM holidays WHERE office_slug = ? AND date BETWEEN ? AND ?",
+            (office_slug, low, high),
+        ).fetchall()
+        existing = {_holiday_key(h): h for h in map(_holiday_from_row, rows)}
+        self._conn.execute(
+            "DELETE FROM holidays WHERE office_slug = ? AND date BETWEEN ? AND ?",
+            (office_slug, low, high),
+        )
+        self._conn.executemany(
+            "INSERT INTO holidays (office_slug, date, name, kind, fetch_id) VALUES (?, ?, ?, ?, ?)",
+            [
+                (h.office_slug, h.date.isoformat(), h.name, h.kind.value, fetch_id)
+                for h in incoming.values()
+            ],
+        )
         return HolidayDiff(
             added=tuple(h for h in incoming.values() if existing.get(_holiday_key(h)) != h),
             removed=tuple(h for k, h in existing.items() if incoming.get(k) != h),
@@ -346,11 +419,11 @@ class Store:
         """Insert new rows and update changed ones. Returns only the new or changed rates."""
         changed: list[FxRate] = []
         now = _now()
-        with self._conn:
+        with self.transaction() as conn:
             for rate in rates:
                 if self._fx_unchanged(rate):
                     continue
-                self._conn.execute(
+                conn.execute(
                     "INSERT INTO fx_rates (currency, date, source, rate, unit, published_at,"
                     " fetch_id, ingested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
                     " ON CONFLICT (currency, date, source) DO UPDATE SET rate = excluded.rate,"
@@ -402,11 +475,11 @@ class Store:
         """Insert new rows and update changed ones. Returns the new or changed count."""
         count = 0
         now = _now()
-        with self._conn:
+        with self.transaction() as conn:
             for rate in rates:
                 if self._mibor_unchanged(rate):
                     continue
-                self._conn.execute(
+                conn.execute(
                     "INSERT INTO mibor_rates (date, tenor, rate, published_at, fetch_id,"
                     " ingested_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (date, tenor)"
                     " DO UPDATE SET rate = excluded.rate, published_at = excluded.published_at,"
@@ -473,13 +546,13 @@ class Store:
         their stored value.
         """
         now = _now()
-        with self._conn:
-            previous = self._conn.execute(
+        with self.transaction() as conn:
+            previous = conn.execute(
                 "SELECT status FROM source_health WHERE source = ? AND dataset = ?",
                 (source.value, dataset.value),
             ).fetchone()
             ok = status is SourceStatus.OK
-            self._conn.execute(
+            conn.execute(
                 "INSERT INTO source_health (source, dataset, status, checked_at, last_success_at,"
                 " last_error_at, last_error, fingerprint_json, drift_json)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (source, dataset) DO UPDATE SET"
@@ -522,8 +595,8 @@ class Store:
 
     def record_event(self, event: str, payload: dict[str, object]) -> str:
         event_id = _new_id("evt")
-        with self._conn:
-            self._conn.execute(
+        with self.transaction() as conn:
+            conn.execute(
                 "INSERT INTO events (event_id, event, payload_json, created_at)"
                 " VALUES (?, ?, ?, ?)",
                 (event_id, event, _dumps(payload), _now()),

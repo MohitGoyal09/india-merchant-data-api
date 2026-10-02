@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from collections.abc import Iterable
 
 from imda.domain.calendar import SATURDAY_RULE_START
@@ -22,10 +23,15 @@ _KIND_LABELS = {
 }
 
 
+# C0 controls except tab, CR and LF (those are escaped below), DEL, NEL, LS and PS.
+_STRIPPED = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x85\u2028\u2029]")
+
+
 def escape_text(value: str) -> str:
-    """Escape a TEXT value: backslash, semicolon, comma and newlines."""
+    """Escape a TEXT value: strip control characters, then backslash, ; , and newlines."""
     return (
-        value.replace("\\", "\\\\")
+        _STRIPPED.sub("", value)
+        .replace("\\", "\\\\")
         .replace(";", r"\;")
         .replace(",", "\\,")
         .replace("\r\n", "\\n")

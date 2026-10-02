@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import decimal
 import hashlib
 import json
 from collections.abc import Callable, Iterator
@@ -16,7 +17,7 @@ from selectolax.parser import HTMLParser
 from imda.config import Settings
 from imda.http.client import ExchangeEvent, PoliteClient
 from imda.ingest.backfill import backfill
-from imda.ingest.common import ExchangeLog
+from imda.ingest.common import ExchangeLog, RunEnv, Task, TaskOutput, run_plan
 from imda.ingest.loaders import rbi_fx_ranges
 from imda.ingest.refresh import refresh
 from imda.models import Currency, Dataset, Source, SourceStatus
@@ -300,10 +301,16 @@ def test_published_events_use_currency_to_dates_payload(store: Store) -> None:
     assert set(payload) <= {c.value for c in Currency}
     assert all(d.startswith("2026-09") for dates in payload.values() for d in dates)
     holiday_events = [e for e in store.events_since(None, 1000) if e["event"] == "holidays.updated"]
-    assert len(holiday_events) == 1
-    offices = holiday_events[0]["payload"]["offices"]  # type: ignore[index]
-    assert offices["mumbai"]["added"] > 0
-    assert offices["mumbai"]["removed"] == 0
+    assert holiday_events  # one per month that changed, recorded with the month's rows
+    periods = [e["payload"]["period"] for e in holiday_events]  # type: ignore[index]
+    assert len(set(periods)) == len(periods)
+    assert all(p.startswith("2026-") for p in periods)
+    added = sum(e["payload"]["offices"]["mumbai"]["added"] for e in holiday_events)  # type: ignore[index]
+    assert added > 0
+    assert all(
+        e["payload"]["offices"].get("mumbai", {}).get("removed", 0) == 0  # type: ignore[index]
+        for e in holiday_events
+    )
 
 
 def test_old_rates_do_not_raise_published_events(store: Store) -> None:
@@ -352,6 +359,9 @@ def test_force_refetches_loaded_years_without_new_diffs(store: Store) -> None:
 def test_replace_semantics_report_changes_on_second_load(store: Store) -> None:
     client = FakeUpstream()
     run_backfill(store, client, {Dataset.HOLIDAYS})
+    events_after_first = len(
+        [e for e in store.events_since(None, 1000) if e["event"] == "holidays.updated"]
+    )
     store._conn.execute(
         "DELETE FROM holidays WHERE office_slug = 'mumbai' AND date LIKE '2026-03-%'"
     )
@@ -365,8 +375,11 @@ def test_replace_semantics_report_changes_on_second_load(store: Store) -> None:
         31,
     }
     updates = [e for e in store.events_since(None, 1000) if e["event"] == "holidays.updated"]
-    assert len(updates) == 2
-    assert updates[1]["payload"]["offices"] == {"mumbai": {"added": 5, "removed": 0}}  # type: ignore[index]
+    assert len(updates) == events_after_first + 1
+    assert updates[-1]["payload"] == {  # type: ignore[index]
+        "period": "2026-03",
+        "offices": {"mumbai": {"added": 5, "removed": 0}},
+    }
 
 
 # ---------------------------------------------------------------- holiday year coverage
@@ -578,6 +591,52 @@ def test_unexpected_exception_finishes_the_run_as_failed(
     [run] = store.runs()
     assert run["status"] == "failed"
     assert "bug" in str(run["summary"])
+
+
+@pytest.mark.parametrize(
+    "error",
+    [KeyError("missing"), decimal.InvalidOperation("bad rate"), RuntimeError("bug")],
+    ids=["KeyError", "InvalidOperation", "RuntimeError"],
+)
+def test_unexpected_task_exception_is_recorded_as_broken_and_other_tasks_still_run(
+    store: Store, error: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    def explode(_: RunEnv) -> TaskOutput:
+        raise error
+
+    def fine(_: RunEnv) -> TaskOutput:
+        return TaskOutput(rows=3)
+
+    plan: list[Task] = [
+        (Source.FBIL, Dataset.FX, explode),
+        (Source.FBIL, Dataset.MIBOR, fine),
+    ]
+
+    summary = run_plan(store, FakeUpstream(), "refresh", plan, today=TODAY)
+
+    failed, ok = summary.tasks
+    assert (failed.status, failed.health) == ("failed", SourceStatus.BROKEN)
+    assert failed.error == f"{type(error).__name__}: {error}"
+    assert (ok.status, ok.rows) == ("ok", 3)
+    assert summary.status == "partial"
+    assert health(store) == {
+        ("fbil", "fx_reference_rates"): "broken",
+        ("fbil", "mibor_overnight"): "ok",
+    }
+    assert store.runs()[0]["status"] == "partial"
+    assert any(r.exc_info for r in caplog.records)  # logger.exception kept the traceback
+
+
+def test_unexpected_exception_message_is_truncated(store: Store) -> None:
+    def explode(_: RunEnv) -> TaskOutput:
+        raise KeyError("x" * 2000)
+
+    summary = run_plan(
+        store, FakeUpstream(), "refresh", [(Source.FBIL, Dataset.FX, explode)], today=TODAY
+    )
+
+    assert summary.tasks[0].error is not None
+    assert len(summary.tasks[0].error) == 500
 
 
 # ---------------------------------------------------------------- exchange logging

@@ -26,10 +26,11 @@ from imda.store.repo import Store
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 FETCHED_AT = dt.datetime(2026, 9, 25, 4, 0, tzinfo=dt.UTC)
-# 2026-09-25 15:00 IST: the newest FBIL USD row (2026-09-24) is the last business day, so fresh.
-FRESH_NOW = dt.datetime(2026, 9, 25, 15, 0, tzinfo=IST)
-# 2026-10-01 15:00 IST: the last business day is 2026-09-30, so FBIL (to 09-24) is stale.
-STALE_NOW = dt.datetime(2026, 10, 1, 15, 0, tzinfo=IST)
+# 2026-09-25 10:00 IST, before the 13:30 publication cutoff: the last expected publication is
+# 2026-09-24, which is the newest FBIL USD row, so fresh.
+FRESH_NOW = dt.datetime(2026, 9, 25, 10, 0, tzinfo=IST)
+# 2026-10-01 10:00 IST: the last expected publication is 2026-09-30, so FBIL (to 09-24) is stale.
+STALE_NOW = dt.datetime(2026, 10, 1, 10, 0, tzinfo=IST)
 
 
 def _payload(kind: str, name: str, ext: str) -> RawPayload:

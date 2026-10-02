@@ -121,16 +121,16 @@ def year_loaded(env: RunEnv, year: int) -> bool:
 def load_holiday_month(
     ctx: HolidayContext, year: int, month: int
 ) -> tuple[dict[str, HolidayDiff], RawPayload]:
-    """POST one month for all offices and replace every office's rows for that month."""
+    """POST one month for all offices and replace every office's rows in one transaction.
+
+    The store records ``holidays.updated`` in that same transaction.
+    """
     [raw] = ctx.adapter.fetch(ctx.client, HolidayQuery(year=year, month=month))
     fetch_id = ctx.env.log.fetch_id_for(raw)
     by_office = _group_month(ctx.adapter.parse(raw), ctx.offices, year, month)
-    diffs = {
-        office.slug: ctx.env.store.replace_holiday_month(
-            office.slug, year, month, by_office.get(office.slug, []), fetch_id
-        )
-        for office in ctx.offices
-    }
+    diffs = ctx.env.store.replace_holiday_month_all(
+        year, month, {o.slug: by_office.get(o.slug, []) for o in ctx.offices}, fetch_id
+    )
     return diffs, raw
 
 
@@ -163,23 +163,12 @@ def load_holiday_year(ctx: HolidayContext, year: int) -> Loaded:
     fetch_id = ctx.env.log.fetch_id_for(raw)
     for office in ctx.offices:
         ctx.env.store.mark_holiday_year_loaded(office.slug, year, fetch_id)
-    return Loaded(record_holiday_event(ctx.env, str(year), monthly), raw)
+    return Loaded(count_changes(monthly), raw)
 
 
-def record_holiday_event(
-    env: RunEnv, period: str, monthly: Sequence[Mapping[str, HolidayDiff]]
-) -> int:
-    """Record ``holidays.updated`` (counts per office) when anything changed; return the total."""
-    counts: dict[str, dict[str, int]] = {}
-    for diffs in monthly:
-        for slug, diff in diffs.items():
-            if diff.added or diff.removed:
-                entry = counts.setdefault(slug, {"added": 0, "removed": 0})
-                entry["added"] += len(diff.added)
-                entry["removed"] += len(diff.removed)
-    if counts:
-        env.store.record_event("holidays.updated", {"period": period, "offices": counts})
-    return sum(c["added"] + c["removed"] for c in counts.values())
+def count_changes(monthly: Sequence[Mapping[str, HolidayDiff]]) -> int:
+    """Total holidays added plus removed across the months' per-office diffs."""
+    return sum(len(d.added) + len(d.removed) for diffs in monthly for d in diffs.values())
 
 
 # ---------------------------------------------------------------- fx and mibor

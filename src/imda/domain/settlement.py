@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from imda.domain.calendar import HolidayCalendar, SkippedDay
+from imda.errors import InvalidInput
 from imda.models import IST
 
 
@@ -51,13 +52,13 @@ def estimate_settlement(
 
     ``skipped`` lists every non-working day strictly between T and the ETA
     (both ends exclusive: T is the anchor, and the ETA is a business day), with
-    the reason. Raises ``ValueError`` for naive datetimes or a negative cycle, and
+    the reason. Raises ``InvalidInput`` for naive datetimes or a negative cycle, and
     ``CalendarDataMissing`` when a touched year has no loaded holiday data.
     """
     if captured_at.tzinfo is None or captured_at.utcoffset() is None:
-        raise ValueError("captured_at must be timezone-aware")
+        raise InvalidInput("captured_at must be timezone-aware")
     if cycle_days < 0:
-        raise ValueError(f"cycle_days must be >= 0, got {cycle_days}")
+        raise InvalidInput(f"cycle_days must be >= 0, got {cycle_days}")
     capture_date = captured_at.astimezone(IST).date()
     eta = _eta_date(office, capture_date, cycle_days, calendar, mode)
     counted = _counted_days(office, capture_date, eta, cycle_days, calendar, mode)
@@ -90,7 +91,7 @@ def _eta_date(
     if mode is SettlementMode.CALENDAR_THEN_ROLL:
         target = capture_date + dt.timedelta(days=cycle_days)
         return calendar.next_business_day(office, target, include_start=True)
-    raise ValueError(f"Unknown settlement mode: {mode!r}")
+    raise InvalidInput(f"Unknown settlement mode: {mode!r}")
 
 
 def _counted_days(

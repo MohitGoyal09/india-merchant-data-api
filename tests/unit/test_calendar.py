@@ -11,6 +11,7 @@ from imda.domain.calendar import (
     HolidayCalendar,
     SkippedDay,
 )
+from imda.errors import InvalidInput
 from imda.models import Holiday, HolidayKind
 
 D = dt.date
@@ -166,7 +167,7 @@ class TestNavigation:
             c.next_business_day(MUM, start)
 
     def test_add_business_days_rejects_negative(self) -> None:
-        with pytest.raises(ValueError, match="n must be"):
+        with pytest.raises(InvalidInput, match="n must be"):
             cal().add_business_days(MUM, D(2026, 3, 27), -1)
 
     def test_iteration_guard(self) -> None:
@@ -187,9 +188,9 @@ class TestNavigation:
     @pytest.mark.parametrize("method", ["business_days_between", "skipped_days"])
     def test_range_errors(self, method: str) -> None:
         fn = getattr(cal(), method)
-        with pytest.raises(ValueError, match="before start"):
+        with pytest.raises(InvalidInput, match="before start"):
             fn(MUM, D(2026, 3, 30), D(2026, 3, 27))
-        with pytest.raises(ValueError, match="366"):
+        with pytest.raises(InvalidInput, match="366"):
             fn(MUM, D(2025, 1, 1), D(2026, 12, 31))
 
 

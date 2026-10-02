@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from imda.api.ics import weekly_off_days
+from imda.config import Settings
+from tests.api.conftest import MakeClient
 from tests.api.helpers import assert_envelope, assert_error, body
 
 
@@ -172,3 +174,18 @@ def test_ics_errors_are_json(client: TestClient) -> None:
     assert_error(client.get("/v1/calendar/nowhere.ics?year=2026"), 404, "OFFICE_NOT_FOUND")
     assert_error(client.get("/v1/calendar/mumbai.ics?year=2027"), 409, "CALENDAR_DATA_MISSING")
     assert_error(client.get("/v1/calendar/mumbai.ics"), 422, "INVALID_REQUEST")
+
+
+def test_ics_leaves_out_closing_of_accounts_when_it_is_not_a_holiday(
+    settings: Settings, make_client: MakeClient
+) -> None:
+    on = make_client().get("/v1/calendar/mumbai.ics?year=2026").text
+    off_settings = settings.model_copy(update={"closing_of_accounts_is_holiday": False})
+    off = make_client(custom=off_settings).get("/v1/calendar/mumbai.ics?year=2026").text
+
+    assert "Kind: closing_of_accounts" in on
+    assert "Kind: closing_of_accounts" not in off
+    assert "closing_of_accounts@imda" not in off
+    assert off.count("BEGIN:VEVENT") == on.count("BEGIN:VEVENT") - on.count(
+        "Kind: closing_of_accounts"
+    )

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
-from imda.models import IST, Dataset, Source, SourceStatus
+from fastapi.testclient import TestClient
+
+from imda.models import IST, Currency, Dataset, FxRate, Source, SourceStatus
 from imda.store.repo import Store
 from tests.api.conftest import STALE_NOW, MakeClient
 from tests.api.helpers import body
@@ -100,3 +103,47 @@ def test_stale_csv_header(make_client: MakeClient) -> None:
     response = make_client(now=STALE_NOW).get(FBIL_WINDOW + "&format=csv")
 
     assert response.headers["X-IMDA-Stale"] == "true"
+
+
+MONDAY_MORNING = dt.datetime(2026, 10, 5, 9, 0, tzinfo=IST)
+# Fri 2026-10-02 is Gandhi Jayanti (a Mumbai holiday) and Sat 10-03 never publishes, so before
+# Monday's cutoff the last expected FX publication is Thu 2026-10-01.
+MONDAY_FBIL_USD = "/v1/fx/rates?currency=USD&from=2026-09-28&to=2026-10-02&source=fbil"
+
+
+def _seed_fbil_usd(store: Store, day: dt.date) -> None:
+    fetch = store.latest_fetch(Source.FBIL, Dataset.FX)
+    assert fetch is not None
+    row = FxRate(currency=Currency.USD, date=day, rate=Decimal("88.5"), unit=1, source=Source.FBIL)
+    store.upsert_fx_rates([row], fetch.fetch_id)
+
+
+def _health_stale(client: TestClient, source: str) -> bool:
+    sources = body(client.get("/v1/sources/health"))["data"]["sources"]
+    (item,) = [s for s in sources if (s["source"], s["dataset"]) == (source, "fx_reference_rates")]
+    return bool(item["freshness"]["stale"])
+
+
+def test_a_saturday_is_never_expected_so_latest_thursday_is_fresh_on_monday(
+    make_client: MakeClient, store: Store
+) -> None:
+    _seed_fbil_usd(store, dt.date(2026, 10, 1))
+    client = make_client(now=MONDAY_MORNING)
+
+    parsed = body(client.get(MONDAY_FBIL_USD))
+
+    assert parsed["provenance"][0]["stale"] is False
+    assert _health_stale(client, "fbil") is False
+
+
+def test_envelope_and_sources_health_agree_when_stale(
+    make_client: MakeClient, store: Store
+) -> None:
+    _seed_fbil_usd(store, dt.date(2026, 9, 30))
+    client = make_client(now=MONDAY_MORNING)
+
+    parsed = body(client.get(MONDAY_FBIL_USD))
+
+    assert parsed["provenance"][0]["stale"] is True
+    assert _health_stale(client, "fbil") is True
+    assert "expected 2026-10-01" in parsed["meta"]["warnings"][0]

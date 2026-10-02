@@ -13,10 +13,13 @@ import pytest
 from imda.store.db import connect, migrate
 from imda.store.webhooks_repo import (
     BACKOFF_SECONDS,
+    ERROR_IN_FLIGHT,
     ERROR_UNSAFE_URL,
+    IN_FLIGHT_TTL_SECONDS,
     MAX_ERROR_LENGTH,
     WebhookRepo,
     backoff_seconds,
+    error_class,
     normalize_events,
 )
 
@@ -85,6 +88,26 @@ def test_deactivate(repo: WebhookRepo) -> None:
     assert repo.deactivate("nope") is False
     assert repo.list_subscriptions() == []
     assert [s.active for s in repo.list_subscriptions(include_inactive=True)] == [False]
+
+
+def test_deactivate_forgets_the_secret_and_redacts_the_url(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    sub, _ = repo.create_subscription("https://hook.example.com/in?token=abc", ["*"], now=T0)
+    repo.deactivate(sub.subscription_id)
+
+    assert repo.get_secret(sub.subscription_id) == ""
+    (stored,) = repo.list_subscriptions(include_inactive=True)
+    assert stored.url == "https://hook.example.com/…"
+    row = conn.execute("SELECT secret, url FROM webhook_subscriptions").fetchone()
+    assert (row["secret"], "abc" in row["url"]) == ("", False)
+
+
+def test_deactivating_twice_does_not_touch_the_row_again(repo: WebhookRepo) -> None:
+    sub, _ = repo.create_subscription(URL, ["*"], now=T0)
+    assert repo.deactivate(sub.subscription_id) is True
+    assert repo.deactivate(sub.subscription_id) is False
+    assert repo.get_secret(sub.subscription_id) == ""
 
 
 def test_normalize_events() -> None:
@@ -219,3 +242,134 @@ def test_deliveries_newest_first_with_limit_and_truncated_error(repo: WebhookRep
     assert [d.attempt for d in found] == [3, 2]
     assert len(found[0].error or "") == MAX_ERROR_LENGTH
     assert repo.deliveries("other") == []
+
+
+# ------------------------------------------------------------------ claims (no double delivery)
+def test_claim_inserts_an_in_flight_row_and_hides_the_pair_from_later_passes(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    sub, _ = repo.create_subscription(URL, ["*"], now=T0)
+    add_event(conn, "e1", "fx.rates.published", at(1))
+
+    (claim,) = repo.claim_work(at(10))
+
+    assert (claim.item.event.event_id, claim.item.attempt) == ("e1", 1)
+    (row,) = repo.deliveries(sub.subscription_id)
+    assert (row.delivery_id, row.error, row.status_code, row.succeeded, row.attempt) == (
+        claim.delivery_id,
+        ERROR_IN_FLIGHT,
+        None,
+        False,
+        1,
+    )
+    assert repo.claim_work(at(11)) == []
+    assert pending_ids(repo, at(11)) == []
+    assert not conn.in_transaction
+
+
+def test_complete_delivery_updates_the_claimed_row(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    sub, _ = repo.create_subscription(URL, ["*"], now=T0)
+    add_event(conn, "e1", "fx.rates.published", at(1))
+    (claim,) = repo.claim_work(at(10))
+
+    repo.complete_delivery(claim.delivery_id, succeeded=True, status_code=204, now=at(12))
+
+    (row,) = repo.deliveries(sub.subscription_id)
+    assert (row.succeeded, row.status_code, row.error, row.attempted_at) == (
+        True,
+        204,
+        None,
+        at(12).isoformat(),
+    )
+    assert pending_ids(repo, at(10_000)) == []
+
+
+def test_failed_completion_follows_the_backoff(conn: sqlite3.Connection, repo: WebhookRepo) -> None:
+    repo.create_subscription(URL, ["*"], now=T0)
+    add_event(conn, "e1", "fx.rates.published", at(1))
+    (claim,) = repo.claim_work(at(10))
+    repo.complete_delivery(
+        claim.delivery_id, succeeded=False, status_code=500, error="http_status", now=at(10)
+    )
+
+    assert pending_ids(repo, at(39)) == []
+    (again,) = repo.claim_work(at(40))
+    assert again.item.attempt == 2
+
+
+def test_a_stale_in_flight_row_counts_as_a_failed_attempt(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    repo.create_subscription(URL, ["*"], now=T0)
+    add_event(conn, "e1", "fx.rates.published", at(1))
+    repo.claim_work(at(10))  # the dispatcher "crashes" here
+
+    just_before = at(10 + IN_FLIGHT_TTL_SECONDS - 1)
+    assert pending_ids(repo, just_before) == []  # still claimed
+    (item,) = repo.pending_work(at(10 + IN_FLIGHT_TTL_SECONDS + 1))
+    assert item.attempt == 2  # the crashed attempt was counted
+
+
+def test_stale_in_flight_rows_still_respect_max_attempts(
+    conn: sqlite3.Connection, repo: WebhookRepo
+) -> None:
+    repo.create_subscription(URL, ["*"], now=T0)
+    add_event(conn, "e1", "fx.rates.published", at(1))
+    repo.claim_work(at(10))
+    assert repo.pending_work(at(100_000), max_attempts=1) == []
+
+
+def test_claim_respects_limit_and_rolls_back_on_error(
+    conn: sqlite3.Connection, repo: WebhookRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sub, _ = repo.create_subscription(URL, ["*"], now=T0)
+    for n in range(3):
+        add_event(conn, f"e{n}", "fx.rates.published", at(1 + n))
+    assert len(repo.claim_work(at(10), limit=2)) == 2
+
+    def boom(*_: object, **__: object) -> list[object]:
+        raise RuntimeError("db hiccup")
+
+    monkeypatch.setattr(repo, "pending_work", boom)
+    with pytest.raises(RuntimeError):
+        repo.claim_work(at(10))
+    assert not conn.in_transaction
+    assert len(repo.deliveries(sub.subscription_id)) == 2
+
+
+def test_two_connections_never_claim_the_same_pair(tmp_path: Path) -> None:
+    path = tmp_path / "shared.sqlite3"
+    first = connect(path)
+    migrate(first)
+    second = connect(path)
+    try:
+        WebhookRepo(first).create_subscription(URL, ["*"], now=T0)
+        add_event(first, "e1", "fx.rates.published", at(1))
+        claimed = [
+            *WebhookRepo(first).claim_work(at(10)),
+            *WebhookRepo(second).claim_work(at(10)),
+        ]
+        assert len(claimed) == 1
+    finally:
+        first.close()
+        second.close()
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "expected"),
+    [
+        (None, 200, None),
+        ("timeout", None, "timeout"),
+        ("connect_error", None, "connect_error"),
+        ("http_status", 500, "http_status"),
+        ("unsafe_url", None, "unsafe_url"),
+        ("in_flight", None, "in_flight"),
+        ("ConnectError: refused 10.0.0.5:22", None, "connect_error"),
+        ("HTTP 500", 500, "http_status"),
+        ("ReadTimeout", None, "timeout"),
+    ],
+)
+def test_error_class_is_coarse(error: str | None, status: int | None, expected: str | None) -> None:
+    assert error_class(error, status) == expected

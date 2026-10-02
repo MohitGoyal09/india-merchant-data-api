@@ -7,6 +7,7 @@ upstream attempt belongs to) and ``HolidayPage`` (the one holiday-page GET per r
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -17,6 +18,9 @@ from imda.http.client import ExchangeEvent
 from imda.models import Dataset, Source, SourceStatus
 from imda.sources.base import HttpClient, ParseError, RawPayload, UpstreamError, UpstreamRequest
 from imda.store.repo import RunKind, Store, exchange_params
+
+logger = logging.getLogger(__name__)
+MAX_ERROR_CHARS = 500
 
 TaskStatus = Literal["ok", "failed", "skipped"]
 _UNHEALTHY = (SourceStatus.DEGRADED, SourceStatus.BROKEN)
@@ -193,7 +197,7 @@ def _overall(results: Sequence[TaskResult]) -> Literal["ok", "partial", "failed"
 def execute_task(
     env: RunEnv, source: Source, dataset: Dataset, fn: Callable[[RunEnv], TaskOutput]
 ) -> TaskResult:
-    """Run one (source, dataset) task; a failure is recorded as health, never raised."""
+    """Run one (source, dataset) task; any failure is recorded as health, never raised."""
     env.log.bind(env.run_id, source, dataset)
     before = env.log.attempts
     try:
@@ -202,6 +206,10 @@ def execute_task(
         return _failed(env, source, dataset, SourceStatus.DEGRADED, str(exc), before)
     except (ParseError, ValueError, sqlite3.IntegrityError) as exc:
         return _failed(env, source, dataset, SourceStatus.BROKEN, _describe(exc), before)
+    except Exception as exc:
+        logger.exception("unexpected error in %s/%s", source.value, dataset.value)
+        message = f"{type(exc).__name__}: {exc}"[:MAX_ERROR_CHARS]
+        return _failed(env, source, dataset, SourceStatus.BROKEN, message, before)
     requests = env.log.attempts - before
     if output.skipped:
         return TaskResult(source, dataset, "skipped", requests=requests)

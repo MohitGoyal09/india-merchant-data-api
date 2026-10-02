@@ -15,6 +15,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from imda.errors import InvalidInput
 from imda.models import Holiday, HolidayKind
 
 SATURDAY_RULE_START = dt.date(2015, 9, 1)
@@ -102,7 +103,7 @@ class HolidayCalendar:
         ``n == 0`` returns ``day`` if it is a business day, else the next one.
         """
         if n < 0:
-            raise ValueError(f"n must be >= 0, got {n}")
+            raise InvalidInput(f"n must be >= 0, got {n}")
         if n == 0:
             return self.next_business_day(office, day, include_start=True)
         current = day
@@ -147,8 +148,8 @@ def _weekend_reasons(day: dt.date) -> list[str]:
 
 def _iter_days(start: dt.date, end: dt.date) -> list[dt.date]:
     if end < start:
-        raise ValueError(f"end {end} is before start {start}")
+        raise InvalidInput(f"end {end} is before start {start}")
     span = (end - start).days + 1
     if span > MAX_ITERATIONS:
-        raise ValueError(f"Range of {span} days exceeds the {MAX_ITERATIONS}-day limit")
+        raise InvalidInput(f"Range of {span} days exceeds the {MAX_ITERATIONS}-day limit")
     return [start + dt.timedelta(days=i) for i in range(span)]

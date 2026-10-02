@@ -18,7 +18,9 @@ from imda.domain.fx_service import (
     FxService,
     RateNotFound,
     SourceChoice,
+    check_range,
 )
+from imda.errors import InvalidInput, RangeTooLarge
 from imda.models import IST, Currency, FxRate, Holiday, HolidayKind, Source
 
 D = dt.date
@@ -150,21 +152,21 @@ class TestRatesAutoMerge:
 
 class TestRangeGuard:
     def test_over_3660_days_rejected(self) -> None:
-        with pytest.raises(ValueError, match="3660"):
+        with pytest.raises(InvalidInput, match="3660"):
             service([]).rates(USD, D(2010, 1, 1), D(2020, 2, 1))
 
     def test_exactly_3660_days_allowed(self) -> None:
         assert service([]).rates(USD, D(2020, 1, 1), D(2020, 1, 1) + dt.timedelta(days=3660)) == []
 
     def test_end_before_start_rejected(self) -> None:
-        with pytest.raises(ValueError, match="before"):
+        with pytest.raises(InvalidInput, match="before"):
             service([]).rates(USD, D(2024, 2, 1), D(2024, 1, 1))
 
     def test_guard_applies_to_stats_and_compare(self) -> None:
         svc = service([])
-        with pytest.raises(ValueError, match="3660"):
+        with pytest.raises(InvalidInput, match="3660"):
             svc.stats(USD, D(2000, 1, 1), D(2026, 1, 1), "month")
-        with pytest.raises(ValueError, match="3660"):
+        with pytest.raises(InvalidInput, match="3660"):
             svc.compare(USD, D(2000, 1, 1), D(2026, 1, 1))
 
 
@@ -304,7 +306,8 @@ class TestConvert:
     def test_exact_keeps_unrounded_value(self) -> None:
         conv = service(self.rows).convert(DEC("100"), "EUR", "USD", self.day)
         assert conv.result == DEC("111.11")
-        assert conv.exact.startswith("111.1111111111")
+        assert isinstance(conv.exact, Decimal)
+        assert str(conv.exact).startswith("111.1111111111")
         assert conv.amount == DEC("100")
 
     @pytest.mark.parametrize(
@@ -326,7 +329,7 @@ class TestConvert:
         [DEC("0"), DEC("-1"), DEC("1.001"), DEC("NaN"), DEC("Infinity")],
     )
     def test_invalid_amounts(self, amount: Decimal) -> None:
-        with pytest.raises(ValueError, match="amount"):
+        with pytest.raises(InvalidInput, match="amount"):
             service(self.rows).convert(amount, "USD", "INR", self.day)
 
     def test_trailing_zeros_beyond_two_places_are_fine(self) -> None:
@@ -337,7 +340,7 @@ class TestConvert:
         ("src", "dst"), [("INR", "INR"), ("USD", "USD"), ("USD", "XYZ"), ("ABC", "INR")]
     )
     def test_invalid_currencies(self, src: str, dst: str) -> None:
-        with pytest.raises(ValueError, match=r"currenc"):
+        with pytest.raises(InvalidInput, match=r"currenc"):
             service(self.rows).convert(DEC("1"), src, dst, self.day)
 
     def test_missing_rate_raises(self) -> None:
@@ -451,3 +454,45 @@ class TestCompare:
         assert rep.rows == ()
         assert rep.summary.max_abs_diff_bps == DEC("0")
         assert rep.summary.rbi_only_days == 1
+
+
+class TestInputErrorsAreTyped:
+    def test_range_too_large_is_an_invalid_input_with_details(self) -> None:
+        with pytest.raises(RangeTooLarge) as exc:
+            check_range(D(2000, 1, 1), D(2026, 1, 1))
+        assert isinstance(exc.value, InvalidInput)
+        assert exc.value.limit == 3660
+        assert exc.value.days == (D(2026, 1, 1) - D(2000, 1, 1)).days
+
+    def test_inverted_range_is_invalid_input(self) -> None:
+        with pytest.raises(InvalidInput):
+            check_range(D(2026, 1, 2), D(2026, 1, 1))
+
+    def test_internal_naive_clock_stays_a_plain_value_error(self) -> None:
+        naive = lambda: dt.datetime(2026, 3, 10, 5, 0)  # noqa: E731
+        with pytest.raises(ValueError, match="timezone-aware") as exc:
+            service([rate(D(2026, 3, 9), "90")], now=naive).as_of(USD, D(2026, 3, 10))
+        assert not isinstance(exc.value, InvalidInput)
+
+
+class TestAsOfAtTheDateFloor:
+    def test_as_of_date_min_does_not_overflow(self) -> None:
+        with pytest.raises(RateNotFound):
+            service([]).as_of(USD, dt.date.min)
+
+
+class TestExactIsADecimal:
+    def test_exact_is_a_decimal_equal_to_the_unrounded_product(self) -> None:
+        rows = [rate(D(2026, 3, 9), "90.00")]
+        conv = service(rows).convert(DEC("1.50"), "USD", "INR", D(2026, 3, 9))
+        assert isinstance(conv.exact, Decimal)
+        assert conv.exact == DEC("135.00")
+
+
+class TestStatsFromRates:
+    def test_stats_of_matches_stats(self) -> None:
+        rows = [rate(D(2026, 3, d), f"90.{d}") for d in (2, 3, 4, 5)]
+        svc = service(rows)
+        fetched = svc.rates(USD, D(2026, 3, 1), D(2026, 3, 31))
+        direct = svc.stats(USD, D(2026, 3, 1), D(2026, 3, 31), "month")
+        assert svc.stats_of(fetched, "month") == direct

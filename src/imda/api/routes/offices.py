@@ -22,8 +22,4 @@ _EXAMPLE = [{"slug": "mumbai", "name": "Mumbai", "state": "Maharashtra", "rbi_id
 )
 def list_offices(ctx: Ctx) -> JSONResponse:
     offices = ctx.store.offices()
-    return success(
-        ctx,
-        [office_view(o) for o in offices],
-        used=[Used(Source.RBI, Dataset.OFFICES)] if offices else [],
-    )
+    return success(ctx, [office_view(o) for o in offices], used=[Used(Source.RBI, Dataset.OFFICES)])

@@ -13,14 +13,17 @@ from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from imda.api.deps import (
+    MAX_API_DATE,
+    MIN_API_DATE,
     AmountText,
+    ConvertCurrency,
     Ctx,
     CurrencyCode,
     IsoDate,
     RequestContext,
-    check_range,
 )
 from imda.api.envelope import Used, assess, envelope_example, success
+from imda.api.errors import invalid_request
 from imda.api.serialize import (
     FX_COLUMNS,
     as_of_view,
@@ -30,7 +33,8 @@ from imda.api.serialize import (
     stats_view,
     to_jsonable,
 )
-from imda.domain.fx_service import Period, SourceChoice
+from imda.domain.fx_service import Period, SourceChoice, check_range
+from imda.errors import InvalidInput
 from imda.models import Currency, Dataset, FxRate, Source
 
 router = APIRouter(prefix="/v1/fx", tags=["fx"])
@@ -57,9 +61,19 @@ def encode_cursor(day: dt.date) -> str:
 def decode_cursor(cursor: str) -> dt.date:
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
-        return dt.date.fromisoformat(base64.urlsafe_b64decode(padded.encode()).decode())
-    except (ValueError, UnicodeError):
-        raise ValueError("invalid cursor") from None
+        day = dt.date.fromisoformat(base64.urlsafe_b64decode(padded.encode()).decode())
+    except (ValueError, OverflowError, UnicodeError):
+        raise InvalidInput("invalid cursor") from None
+    if not MIN_API_DATE <= day <= MAX_API_DATE:
+        raise InvalidInput("invalid cursor")
+    return day
+
+
+def _cursor_start(cursor: str) -> dt.date:
+    try:
+        return decode_cursor(cursor) + dt.timedelta(days=1)
+    except InvalidInput as exc:
+        raise invalid_request("query", "cursor", str(exc)) from None
 
 
 def fx_used(
@@ -76,10 +90,11 @@ def fx_used(
 
 
 def _sources_of(rows: Iterable[FxRate], explicit: SourceChoice) -> list[Source]:
-    found = [r.source for r in rows]
-    if not found and explicit != "auto":
-        return [Source(explicit)]
-    return sorted(set(found), key=lambda s: s.value)
+    """The sources that supplied ``rows``; with none, the ones the query would have drawn on."""
+    found = sorted({r.source for r in rows}, key=lambda s: s.value)
+    if found:
+        return found
+    return [Source.RBI, Source.FBIL] if explicit == "auto" else [Source(explicit)]
 
 
 def _wants_csv(fmt: str | None, accept: str | None) -> bool:
@@ -145,10 +160,10 @@ def fx_rates(
     max_page = ctx.settings.max_page_size
     page_size = min(DEFAULT_PAGE_SIZE, max_page) if limit is None else limit
     if page_size > max_page:
-        raise ValueError(f"limit must be at most {max_page}")
+        raise invalid_request("query", "limit", f"limit must be at most {max_page}")
     start = from_
     if cursor is not None:
-        start = max(from_, decode_cursor(cursor) + dt.timedelta(days=1))
+        start = max(from_, _cursor_start(cursor))
     rows = ctx.fx.rates(currency, start, to, source) if start <= to else []
     page = rows[:page_size]
     next_cursor = encode_cursor(page[-1].date) if len(rows) > page_size else None
@@ -224,8 +239,8 @@ def fx_as_of(
 def fx_convert(
     ctx: Ctx,
     amount: Annotated[AmountText, Query(description="Positive, at most 2 decimal places")],
-    from_: Annotated[str, Query(alias="from", min_length=3, max_length=3)],
-    to: Annotated[str, Query(min_length=3, max_length=3)],
+    from_: Annotated[ConvertCurrency, Query(alias="from", min_length=3, max_length=3)],
+    to: Annotated[ConvertCurrency, Query(min_length=3, max_length=3)],
     date: Annotated[IsoDate, Query(description="YYYY-MM-DD")],
     source: Annotated[SourceChoice, _SOURCE_Q] = "auto",
 ) -> JSONResponse:
@@ -271,8 +286,9 @@ def fx_stats(
     source: Annotated[SourceChoice, _SOURCE_Q] = "auto",
 ) -> JSONResponse:
     check_range(from_, to)
-    stats = ctx.fx.stats(currency, from_, to, period, source)
-    sources = _sources_of(ctx.fx.rates(currency, from_, to, source), source)
+    rates = ctx.fx.rates(currency, from_, to, source)
+    stats = ctx.fx.stats_of(rates, period)
+    sources = _sources_of(rates, source)
     warnings = [] if stats else ["no rates in the requested range"]
     return success(
         ctx,

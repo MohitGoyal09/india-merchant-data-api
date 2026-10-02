@@ -87,3 +87,30 @@ def test_render_uses_crlf_and_one_event_per_holiday() -> None:
 def test_weekly_off_respects_the_2015_rule_start() -> None:
     assert weekly_off_days(2015)[0] == dt.date(2015, 9, 12)
     assert len(weekly_off_days(2026)) == 24
+
+
+@pytest.mark.parametrize(
+    "char",
+    ["\x00", "\x01", "\x08", "\x0b", "\x0c", "\x1b", "\x1f", "\x7f", "\x85", "\u2028", "\u2029"],
+)
+def test_escape_text_strips_control_and_unicode_line_breaks(char: str) -> None:
+    assert escape_text(f"a{char}b") == "ab"
+
+
+def test_escape_text_keeps_tab_and_still_escapes_newlines() -> None:
+    assert escape_text("a\tb\nc") == "a\tb\\nc"
+
+
+def test_rendered_calendar_has_no_injected_lines_from_hostile_names() -> None:
+    hostile = Holiday(
+        office_slug="mumbai",
+        date=dt.date(2026, 1, 26),
+        name="Day\u2028END:VEVENT\x00\x1bBEGIN:VEVENT",
+        kind=HolidayKind.NI_ACT,
+    )
+
+    text = render_calendar(OFFICE, 2026, [hostile], stamp=STAMP)
+
+    lines = text.split("\r\n")
+    assert lines.count("BEGIN:VEVENT") == lines.count("END:VEVENT") == 1
+    assert not any(c in text for c in "\x00\x1b\x85\u2028\u2029")

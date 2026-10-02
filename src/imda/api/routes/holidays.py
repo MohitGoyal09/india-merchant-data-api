@@ -74,6 +74,6 @@ def list_holidays(
     return success(
         ctx,
         [holiday_view(h) for h in holidays],
-        used=[_RBI_HOLIDAYS] if holidays else [],
+        used=[_RBI_HOLIDAYS],
         warnings=warnings,
     )

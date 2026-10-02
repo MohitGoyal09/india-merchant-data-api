@@ -11,14 +11,12 @@ from fastapi.responses import JSONResponse
 
 from imda.api.deps import RequestContext
 from imda.api.serialize import to_jsonable
-from imda.domain.calendar import CalendarDataMissing
-from imda.domain.fx_service import FX_CALENDAR_OFFICE
+from imda.health.freshness import expected_fx_publication
 from imda.models import Dataset, Provenance, Source, SourceStatus
 from imda.sources.fbil.common import BASE_URL as FBIL_BASE_URL
 from imda.sources.rbi.fx import FX_URL as RBI_FX_URL
 from imda.sources.rbi.holidays import HOLIDAYS_URL as RBI_HOLIDAYS_URL
 
-LOOKBACK_DAYS = 14
 _BAD_STATUSES = frozenset({SourceStatus.DEGRADED.value, SourceStatus.BROKEN.value})
 _FALLBACK_URLS: Mapping[tuple[Source, Dataset], str] = {
     (Source.RBI, Dataset.OFFICES): RBI_HOLIDAYS_URL,
@@ -63,19 +61,16 @@ def _dedupe(used: Iterable[Used]) -> list[Used]:
     return list(merged.values())
 
 
-def _expected_latest(ctx: RequestContext, warnings: list[str]) -> dt.date | None:
-    """The last Mumbai business day before today: what a fresh time series should reach."""
-    today = ctx.today()
-    try:
-        for offset in range(1, LOOKBACK_DAYS + 1):
-            day = today - dt.timedelta(days=offset)
-            if ctx.calendar.is_business_day(FX_CALENDAR_OFFICE, day):
-                return day
-    except CalendarDataMissing as exc:
-        warnings.append(
-            f"staleness not checked: holiday data for {exc.office} {exc.year} is not loaded"
-        )
-    return None
+def _expected_for_staleness(ctx: RequestContext, warnings: list[str]) -> dt.date | None:
+    """The newest day a time series should reach: the one ``/v1/sources/health`` expects.
+
+    ``None`` (no staleness verdict) when the holiday calendar is incomplete for the walk-back.
+    """
+    expected = expected_fx_publication(ctx.now(), ctx.calendar, ctx.settings.fx_publish_cutoff_ist)
+    if expected.calendar_incomplete:
+        warnings.append("staleness not checked: holiday data is not loaded for the expected date")
+        return None
+    return expected.date
 
 
 def assess(ctx: RequestContext, used: Iterable[Used]) -> Assessment:
@@ -86,7 +81,9 @@ def assess(ctx: RequestContext, used: Iterable[Used]) -> Assessment:
         (str(r["source"]), str(r["dataset"])): str(r["status"]) for r in ctx.store.source_health()
     }
     expected = (
-        _expected_latest(ctx, warnings) if any(i.latest_date is not None for i in items) else None
+        _expected_for_staleness(ctx, warnings)
+        if any(i.latest_date is not None for i in items)
+        else None
     )
     provenance: list[Provenance] = []
     degraded = False

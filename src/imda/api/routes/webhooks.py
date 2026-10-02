@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
@@ -10,13 +11,21 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from imda.api.auth import ADMIN_RESPONSES, AdminDeps
-from imda.api.deps import Ctx
+from imda.api.deps import Ctx, RequestContext
 from imda.api.envelope import success
 from imda.api.errors import ApiError
 from imda.events import signing
 from imda.events.ssrf import MAX_URL_LENGTH, UnsafeWebhookUrl
 from imda.events.webhooks import register_subscription
-from imda.store.webhooks_repo import ALLOWED_EVENTS, WILDCARD, Subscription, WebhookRepo
+from imda.store.repo import Store
+from imda.store.webhooks_repo import (
+    ALLOWED_EVENTS,
+    WILDCARD,
+    Delivery,
+    Subscription,
+    WebhookRepo,
+    error_class,
+)
 
 router = APIRouter(
     prefix="/v1/webhooks", tags=["webhooks"], dependencies=AdminDeps, responses=ADMIN_RESPONSES
@@ -69,6 +78,29 @@ def subscription_view(subscription: Subscription) -> dict[str, object]:
     }
 
 
+def delivery_view(delivery: Delivery) -> dict[str, object]:
+    """Public view of a delivery: the HTTP status and a coarse error class, never exception
+    text (which could show what an internal host answered)."""
+    return {
+        "delivery_id": delivery.delivery_id,
+        "subscription_id": delivery.subscription_id,
+        "event_id": delivery.event_id,
+        "attempt": delivery.attempt,
+        "status_code": delivery.status_code,
+        "error": error_class(delivery.error, delivery.status_code),
+        "attempted_at": delivery.attempted_at,
+        "succeeded": delivery.succeeded,
+    }
+
+
+@contextmanager
+def writable_repo(ctx: RequestContext) -> Iterator[WebhookRepo]:
+    """A repo on a read-write connection. Requests get a read-only store, so writes open their
+    own (the schema already exists, so nothing is migrated)."""
+    with Store.open(ctx.settings.db_path, migrate=False) as store:
+        yield WebhookRepo(store.connection)
+
+
 def _not_found(subscription_id: str) -> ApiError:
     return ApiError(
         404,
@@ -80,11 +112,13 @@ def _not_found(subscription_id: str) -> ApiError:
 
 @router.post("", status_code=201, summary="Create a subscription (secret shown once)")
 def create_webhook(body: WebhookIn, ctx: Ctx) -> JSONResponse:
-    repo = WebhookRepo(ctx.store.connection)
     try:
-        subscription, secret = register_subscription(repo, ctx.settings, body.url, body.events)
+        with writable_repo(ctx) as repo:
+            subscription, secret = register_subscription(repo, ctx.settings, body.url, body.events)
     except UnsafeWebhookUrl as exc:
         raise ApiError(422, "UNSAFE_WEBHOOK_URL", str(exc)) from None
+    except ValueError as exc:  # unknown or empty event names
+        raise ApiError(422, "VALIDATION_ERROR", str(exc)) from None
     data = {
         **subscription_view(subscription),
         "secret": secret,
@@ -101,9 +135,13 @@ def list_webhooks(ctx: Ctx) -> JSONResponse:
     return success(ctx, [subscription_view(s) for s in repo.list_subscriptions()])
 
 
-@router.delete("/{subscription_id}", status_code=204, summary="Stop a subscription")
+@router.delete(
+    "/{subscription_id}", status_code=204, summary="Stop a subscription (its secret is erased)"
+)
 def delete_webhook(subscription_id: str, ctx: Ctx) -> Response:
-    if not WebhookRepo(ctx.store.connection).deactivate(subscription_id):
+    with writable_repo(ctx) as repo:
+        deactivated = repo.deactivate(subscription_id)
+    if not deactivated:
         raise _not_found(subscription_id)
     return Response(status_code=204)
 
@@ -117,4 +155,4 @@ def list_deliveries(
     repo = WebhookRepo(ctx.store.connection)
     if repo.get_subscription(subscription_id) is None:
         raise _not_found(subscription_id)
-    return success(ctx, [asdict(d) for d in repo.deliveries(subscription_id, limit)])
+    return success(ctx, [delivery_view(d) for d in repo.deliveries(subscription_id, limit)])

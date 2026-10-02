@@ -13,7 +13,7 @@ from imda.api.envelope import Used, envelope_example, success
 from imda.api.errors import ERROR_RESPONSES
 from imda.api.ics import render_calendar
 from imda.domain.calendar import CalendarDataMissing
-from imda.models import Dataset, Source
+from imda.models import Dataset, HolidayKind, Source
 
 router = APIRouter(prefix="/v1/calendar", tags=["calendar"])
 
@@ -121,10 +121,16 @@ def calendar_feed(
     office_row = next(o for o in ctx.store.offices() if o.slug == slug)
     fetch = ctx.store.latest_fetch(Source.RBI, Dataset.HOLIDAYS)
     stamp = fetch.fetched_at if fetch else ctx.now()
+    holidays = [
+        h
+        for h in ctx.store.holidays(slug, year)
+        if ctx.settings.closing_of_accounts_is_holiday
+        or h.kind is not HolidayKind.CLOSING_OF_ACCOUNTS
+    ]
     body = render_calendar(
         office_row,
         year,
-        ctx.store.holidays(slug, year),
+        holidays,
         stamp=stamp,
         include_weekly_off=include_weekly_off,
     )
