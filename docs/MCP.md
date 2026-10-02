@@ -239,7 +239,7 @@ Real example: `fetch_holidays` with `office=mumbai, year=2031`:
 
 | Layer | What | Command | Bar |
 |---|---|---|---|
-| 1. Contract evals (no LLM, no network) | Every tool, errors, annotations, output schemas, provenance, toolsets, stdio and HTTP with bearer auth. Each result is also compared with the REST API. | `make mcp-evals` | 152 tests passed in the last run. Must be 100%. |
+| 1. Contract evals (no LLM, no network) | Every tool, errors, annotations, output schemas, provenance, toolsets, stdio and HTTP with bearer auth. Each result is also compared with the REST API. | `make mcp-evals` | 227 tests passed in the last run (2026-10-02). Must be 100%. |
 | 2. Agent evals (Claude, opt-in) | Twelve merchant questions, scored by rules and not by a judge. | See [evals/README.md](../evals/README.md) | See [PLAN_MCP.md](PLAN_MCP.md) section 5 |
 | 3. Spec freshness | `docs/mcp_tool_spec.json` matches the live server. | `uv run python scripts/export_tool_spec.py --check` | Exit code 0 |
 

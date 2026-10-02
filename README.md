@@ -21,6 +21,173 @@ every response. It is a take-home for the Razorpay "reverse-engineer an API" tas
 | Webhooks | HMAC-signed events: rates published, holidays updated, source degraded or recovered | Local |
 | Health and drift | Status, drift report and freshness for each source | Local |
 
+## How it works
+**The rule: ingest fills a local SQLite file, and the API and MCP server only read it.** They never call RBI or FBIL while they answer. Every diagram follows real modules, tables and endpoints. More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+**1. System architecture.** RBI and FBIL pages go through one polite HTTP client into SQLite. The API and the MCP server read SQLite through the same domain code. Two side paths run beside the main path: a drift check that writes `source_health`, and signed webhooks.
+```mermaid
+flowchart LR
+    subgraph SRC["Upstream"]
+        RBI["RBI<br/>ASP.NET WebForms"]; FBIL["FBIL<br/>/wasdm JSON"]
+    end
+    subgraph ADP["sources/ adapters"]
+        ARBI["sources/rbi<br/>holidays, fx, offices"]; AFBIL["sources/fbil<br/>fx, mibor"]
+    end
+    PC["http/client.py PoliteClient<br/>pacing, retries, breaker,<br/>budget, size cap"]
+    subgraph ING["ingest/"]
+        BF["backfill"]; RF["refresh"]
+    end
+    WK["worker.py"]
+    DB[("SQLite<br/>offices, holidays, holiday_years,<br/>fx_rates, mibor_rates, fetch_log,<br/>ingest_runs, source_health,<br/>events, webhook_*")]
+    HEALTH["health/<br/>drift + canary"]
+    subgraph DOM["domain/"]
+        CAL["calendar"]; SET["settlement"]; FX["fx_service"]; INV["invoice"]
+    end
+    API["api/ FastAPI REST"]; MCP["mcp/ server<br/>stdio or HTTP /mcp"]
+    WH["events/ webhooks<br/>HMAC, SSRF guard"]; OUT["Merchant endpoints"]
+    RBI --> ARBI --> PC
+    FBIL --> AFBIL --> PC
+    PC --> BF & RF --> DB
+    WK --> RF & WH
+    RF -- fingerprint --> HEALTH -- source_health --> DB
+    DB --> CAL --> SET --> INV
+    DB --> FX --> INV
+    DOM --> API --> MER["Merchant apps"]
+    DOM --> MCP --> AGT["Agent Studio agent"] & CC["Claude Code"]
+    DB -- events --> WH -- "signed POST" --> OUT
+```
+**2. Reverse-engineering flow.** RBI needs a GET for the hidden form fields, then a POST. FBIL needs one GET with ISO dates. Both end in the same parse and fingerprint check. Details: [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md).
+```mermaid
+sequenceDiagram
+    participant I as ingest/
+    participant A as sources/rbi, sources/fbil
+    participant C as PoliteClient
+    participant R as RBI
+    participant F as FBIL /wasdm
+    participant H as health/drift
+    I->>A: fetch(client, query)
+    A->>C: GET HolidayMatrixDisplay.aspx; C->>R: GET (1 request / 2 s)
+    R-->>A: HTML with __VIEWSTATE, __EVENTVALIDATION
+    A->>C: POST hidden fields + drRegionalOffice, drMonth, drYear; C->>R: POST
+    R-->>A: HTML table
+    A->>C: GET /wasdm/refrates/fetchfiltered?fromDate=YYYY-MM-DD&authenticated=false; C->>F: GET
+    F-->>A: JSON rows (no token, no captcha)
+    A-->>I: RawPayload list
+    I->>A: parse(raw) and fingerprint(raw)
+    A-->>I: models, or ParseError on a new layout
+    I->>H: compare fingerprint with baselines.json
+```
+**3. Request lifecycle.** The route never calls upstream. The envelope adds where the data came from and flags stale or degraded sources. A domain error becomes `{"error": {code, message, details}, "request_id"}`.
+```mermaid
+sequenceDiagram
+    participant K as Client
+    participant A as api/ FastAPI
+    participant S as Store (read-only)
+    participant D as domain/ FxService
+    participant E as api/envelope.py
+    K->>A: GET /v1/fx/rates/as-of?currency=USD&date=2026-01-26
+    A->>A: set X-Request-ID, validate input
+    A->>D: as_of(USD, 2026-01-26)
+    D->>S: fx_rates, holidays; S-->>D: rows
+    D-->>A: AsOfResult (effective_date, reason, lag_days)
+    A->>S: latest fetch_log and source_health; A->>E: build envelope
+    E-->>A: data, meta.degraded, meta.warnings, provenance[].stale
+    A-->>K: 200 JSON + X-Request-ID
+```
+**4. Agent over MCP.** The agent can only call read-only tools. A tool error returns as `isError=true` with a hint. The loop stops after 10 turns at most.
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant L as agent/loop.py
+    participant C as claude-opus-5-5
+    participant M as MCP server
+    participant D as domain/
+    U->>L: "USD 1,200 paid on 24 Dec 2025: INR value and Mumbai settlement?"
+    L->>M: tools/list; M-->>L: 13 read-only tools
+    L->>C: messages.create(system, tools, question)
+    C-->>L: stop_reason tool_use: quote_invoice
+    L->>M: tools/call quote_invoice; M->>D: FxService + estimate_settlement
+    D-->>M: conversion and settlement
+    M-->>L: summary, structuredContent, provenance, warnings
+    L->>C: tool_result; C-->>L: stop_reason end_turn
+    L-->>U: INR value, rate date, skipped holidays, estimate note
+```
+**5. Settlement ETA logic.** Every non-working day between T and the ETA is listed in `skipped` with its reason. If a touched year has no holiday data, the call fails with `CALENDAR_DATA_MISSING`.
+```mermaid
+flowchart TD
+    A["captured_at (needs UTC offset)"] --> B["T = capture date in IST"] --> M{"mode"}
+    M -- working_days --> W["next day, from T+1"] --> Q{"working day for the office?"}
+    Q -- no --> SK["add to skipped with reason"] --> W
+    Q -- yes --> DONE{"cycle_days working days counted?"}
+    DONE -- no --> W
+    DONE -- yes --> ETA["ETA, counted_days, skipped"]
+    M -- calendar_then_roll --> T2["target = T + cycle_days calendar days"] --> R["roll forward to next working day"] --> ETA
+    RULES["Not a working day if:<br/>Sunday<br/>2nd or 4th Saturday (from 2015-09-01)<br/>RBI NI-Act holiday for the office<br/>1 April closing of accounts, if enabled<br/>RTGS-only holiday: banks open, so it counts as working"] -.-> Q
+```
+**6. FX source merge and as-of.** Each row keeps its own `source`. Over 176 overlapping days in 2026, RBI and FBIL agree exactly (`GET /v1/fx/compare`).
+```mermaid
+flowchart TD
+    REQ["currency, date, source=auto"] --> LOAD["load rbi and fbil rows from fx_rates"] --> PREF{"day >= 2018-07-10?"}
+    PREF -- yes --> PF["prefer FBIL row"] --> HAS{"preferred row exists?"}
+    PREF -- no --> PR["prefer RBI row"] --> HAS
+    HAS -- yes --> USE["use it"] --> ASOF{"row on the requested date?"}
+    HAS -- no --> FO["fail over to the other source"] --> ASOF
+    ASOF -- yes --> EXACT["effective_date = date, no reason"]
+    ASOF -- no --> WALK["walk back one day at a time (10 days by default)"] --> FOUND{"earlier row found?"}
+    FOUND -- no --> NF["404 RATE_NOT_FOUND"]; FOUND -- yes --> RES["effective_date, lag_days, reason"]
+    RES --> WHY["reason, first match wins:<br/>future date: not yet published<br/>Saturday, Sunday<br/>holiday name (Mumbai calendar)<br/>today before 13:30 IST: not yet published<br/>source=rbi in 2018-07-25..2022-04-11: RBI gap"]
+```
+**7. Data model.** Every data table has a `fetch_id` that points to the fetch that produced the row, so each answer has provenance. Links are labelled with the key column. `source_health` is keyed by (source, dataset). Rates are `Decimal` stored as text.
+```mermaid
+erDiagram
+    ingest_runs ||--o{ fetch_log : run_id
+    fetch_log |o--o{ offices : fetch_id
+    fetch_log |o--o{ holidays : fetch_id
+    fetch_log |o--o{ holiday_years : fetch_id
+    fetch_log |o--o{ mibor_rates : fetch_id
+    fetch_log |o--o{ fx_rates : fetch_id
+    offices ||--o{ holidays : office_slug
+    offices ||--o{ holiday_years : office_slug
+    events ||--o{ webhook_deliveries : event_id
+    webhook_subscriptions ||--o{ webhook_deliveries : subscription_id
+    offices {
+        text slug PK
+    }
+    holidays {
+        text office_slug PK
+        text date PK
+        text kind PK "ni_act, closing_of_accounts"
+    }
+    holiday_years {
+        text office_slug PK
+        int year PK
+    }
+    fx_rates {
+        text currency PK
+        text date PK
+        text source PK "rbi, fbil"
+        text rate
+        int unit "1, 100, 10000"
+    }
+    mibor_rates {
+        text date PK
+        text tenor PK
+    }
+    source_health {
+        text source PK
+        text dataset PK
+    }
+```
+
+## Key numbers
+| Item | Value |
+|---|---|
+| Rows in the database | 30,912 FX (2000-01-03 to 2026-10-01), 2,703 MIBOR (from 2015-07-22), 13,282 holidays (34 offices, 2001 to 2026) |
+| Upstream requests | about 380 for the full history (41 MB), 47 for a backfill from 2024-01-01, 6 to 8 for a daily refresh |
+| REST cases (`make cases`) | 31 cases: 30 passed, 0 failed, 1 skipped |
+| Tests (`make check`, 2026-10-02) | 1,295 passed, 98.68% coverage (gate 80%); 227 of them are MCP contract tests |
+| Agent eval (live, `claude-opus-5-5`) | 12/12 passed, tool selection 100%, about USD 0.25 |
+
 ## Quickstart
 You need [uv](https://docs.astral.sh/uv/) and Python 3.12 or newer.
 
@@ -227,7 +394,7 @@ Design and data flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Development
 | Command | What it does |
 |---|---|
-| `make check` | `ruff`, `mypy --strict`, and offline tests with coverage (gate: 80%). Result on 2026-10-02: 817 passed, 98.72% coverage. |
+| `make check` | `ruff`, `mypy --strict`, and offline tests with coverage (gate: 80%). Result on 2026-10-02: 1,295 passed, 98.68% coverage. |
 | `make test-live` | 5 opt-in tests that call real RBI and FBIL (about 40 seconds). |
 | `make canary` | Sample each source once and check it against the baselines. |
 

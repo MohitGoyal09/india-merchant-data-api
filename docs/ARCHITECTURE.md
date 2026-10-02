@@ -10,42 +10,38 @@ The build plan and its reasons are in [PLAN.md](PLAN.md). How each site was mapp
 
 ## Components and data flow
 
+This is the same diagram as in the [README](../README.md#how-it-works). The README also has the reverse-engineering flow, request lifecycle, agent over MCP, settlement ETA logic, FX source merge and data model diagrams.
+
 ```mermaid
 flowchart LR
-    subgraph Sources
-        RBI["RBI<br/>ASP.NET WebForms HTML"]
-        FBIL["FBIL<br/>Angular SPA, JSON backend"]
+    subgraph SRC["Upstream"]
+        RBI["RBI<br/>ASP.NET WebForms"]; FBIL["FBIL<br/>/wasdm JSON"]
     end
-
-    subgraph Adapters["sources/ (one adapter per dataset)"]
-        A1["rbi/holidays, rbi/fx<br/>(rbi/aspnet postback)"]
-        A2["fbil/fx, fbil/mibor"]
+    subgraph ADP["sources/ adapters"]
+        ARBI["sources/rbi<br/>holidays, fx, offices"]; AFBIL["sources/fbil<br/>fx, mibor"]
     end
-
-    PC["http/client.py<br/>PoliteClient<br/>1 req / 2 s / host, retry, breaker, budget"]
-    ING["ingest/<br/>backfill, refresh"]
-    DB[("SQLite<br/>rows, fetch_log,<br/>ingest_runs, source_health,<br/>events, webhooks")]
-    DOM["domain/<br/>calendar, settlement,<br/>fx_service, invoice"]
-    API["api/<br/>FastAPI: envelope,<br/>provenance, errors"]
-    HEALTH["health/<br/>drift, canary, freshness"]
-    EV["events/<br/>signed webhooks"]
-    WK["worker<br/>refresh + dispatch loop"]
-
-    RBI --> A1
-    FBIL --> A2
-    A1 --> PC
-    A2 --> PC
-    PC --> ING
-    ING --> DB
-    DB --> DOM --> API
-    ING -- fingerprint --> HEALTH
-    HEALTH -- status, drift --> DB
-    DB -- source_health --> API
-    ING -- "events (rates, holidays, status change)" --> DB
-    DB --> EV
-    WK --> ING
-    WK --> EV
-    EV -- "HMAC-signed POST" --> OUT(["subscriber"])
+    PC["http/client.py PoliteClient<br/>pacing, retries, breaker,<br/>budget, size cap"]
+    subgraph ING["ingest/"]
+        BF["backfill"]; RF["refresh"]
+    end
+    WK["worker.py"]
+    DB[("SQLite<br/>offices, holidays, holiday_years,<br/>fx_rates, mibor_rates, fetch_log,<br/>ingest_runs, source_health,<br/>events, webhook_*")]
+    HEALTH["health/<br/>drift + canary"]
+    subgraph DOM["domain/"]
+        CAL["calendar"]; SET["settlement"]; FX["fx_service"]; INV["invoice"]
+    end
+    API["api/ FastAPI REST"]; MCP["mcp/ server<br/>stdio or HTTP /mcp"]
+    WH["events/ webhooks<br/>HMAC, SSRF guard"]; OUT["Merchant endpoints"]
+    RBI --> ARBI --> PC
+    FBIL --> AFBIL --> PC
+    PC --> BF & RF --> DB
+    WK --> RF & WH
+    RF -- fingerprint --> HEALTH -- source_health --> DB
+    DB --> CAL --> SET --> INV
+    DB --> FX --> INV
+    DOM --> API --> MER["Merchant apps"]
+    DOM --> MCP --> AGT["Agent Studio agent"] & CC["Claude Code"]
+    DB -- events --> WH -- "signed POST" --> OUT
 ```
 
 | Folder | Job |
@@ -57,6 +53,7 @@ flowchart LR
 | `src/imda/domain/` | Pure logic: business days, settlement ETA, FX as-of, convert, stats, compare, invoice. |
 | `src/imda/health/` | Drift check against `baselines.json`, canary, freshness. |
 | `src/imda/events/` | Webhook signing, SSRF guard, delivery with retries. |
+| `src/imda/mcp/`, `src/imda/agent/` | Read-only MCP server (13 tools, stdio and HTTP `/mcp`) and the demo agent loop. See [MCP.md](MCP.md). |
 | `src/imda/api/` | FastAPI app, routes, success envelope, error handlers, ICS and CSV output. |
 | `src/imda/worker.py`, `cli.py` | The `imda` command and the scheduled worker. |
 
@@ -109,7 +106,7 @@ class SourceAdapter(Protocol[Q, T]):
    An unexpected exception becomes `INTERNAL_ERROR`, and the trace stays in the server log.
 6. The middleware writes one JSON access-log line and returns the `X-Request-ID` header.
 
-Field names and the error code list are in [API.md](API.md).
+Field names and the error code list are in [API.md](API.md). A sequence diagram of this flow is in the [README](../README.md#how-it-works).
 
 ## Ingest lifecycle
 
@@ -181,6 +178,6 @@ events only. It never writes rates or holidays.
 | Cases script | `scripts/run_cases.py`, `scripts/cases.py` | 31 named cases through the real API. `make cases` runs offline on a seeded fixture database. `make cases-live` runs against a running server. |
 
 `make check` runs `ruff`, `mypy --strict` and the offline tests with coverage. Result on
-2026-10-02: lint clean, mypy clean on 60 source files, **817 tests passed** (5 live tests
-deselected), **98.72% coverage** (the gate is 80%). CI runs the same `make check`
+2026-10-02: lint clean, mypy clean on 82 source files, **1,295 tests passed** (5 live tests
+deselected), **98.68% coverage** (the gate is 80%). CI runs the same `make check`
 (`.github/workflows/ci.yml`).
