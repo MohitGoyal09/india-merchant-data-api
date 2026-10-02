@@ -96,3 +96,16 @@ Add `"negate": true` to require that a check does NOT hold (for example, no inve
   That is expected and does not fail a case.
 - With the refusal fallback on (default), a declined request re-runs on another model. The results
   file records `model_served` and `fallback_used`. Cost for a fallback call uses Opus 5.5 rates.
+
+## Latest live run (2026-10-02, `claude-opus-5-5`, fixture DB)
+
+| Metric | Result |
+|---|---|
+| Pass rate | **12/12 (100%)**, bar 11/12 |
+| Tool selection | 100% |
+| Average tool calls | 1.2 |
+| Tokens | 14,289 input, 5,723 output, 8,053 cache write, 193,272 cache read |
+| Cost | about USD 0.25 |
+
+Full results: [`docs/demo/agent-eval-2026-10-02.json`](../docs/demo/agent-eval-2026-10-02.json).
+Live demo transcript (real data): [`docs/demo/usd-invoice-settlement.md`](../docs/demo/usd-invoice-settlement.md).

@@ -245,6 +245,9 @@ Real example: `fetch_holidays` with `office=mumbai, year=2031`:
 
 After you change a tool, run `uv run python scripts/export_tool_spec.py` to refresh the spec.
 
+
+**Latest live agent eval (2026-10-02, `claude-opus-5-5`): 12/12 passed, tool selection 100%, about USD 0.25.** See [`evals/README.md`](../evals/README.md) and the demo transcript [`demo/usd-invoice-settlement.md`](demo/usd-invoice-settlement.md).
+
 ## 9. How this maps to Agent Studio
 
 - **One private connector for each merchant org.** Run one server for each merchant org and
