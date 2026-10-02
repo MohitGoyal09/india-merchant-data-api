@@ -525,3 +525,15 @@ def test_marker_without_known_glyph_or_legend_is_a_parse_error():
     )
     with pytest.raises(ParseError, match="unknown marker"):
         RbiHolidayAdapter().parse(load_payload("holidays_all_2007_01_rtgs", body=html.encode()))
+
+
+def test_rtgs_only_diamond_marker_is_not_a_bank_holiday():
+    # April 2018: "◆" = Real Time Gross Settlement holiday only; banks are open that day.
+    holidays = RbiHolidayAdapter().parse(load_payload("holidays_all_2018_04_rtgs_only"))
+    mumbai = {(h.date.day, h.kind) for h in holidays if h.office_slug == "mumbai"}
+    # 7 columns for Mumbai: 1 RTGS-only (dropped), 1 closing of accounts, 2 NI Act, 3 empty.
+    assert mumbai == {
+        (2, HolidayKind.CLOSING_OF_ACCOUNTS),
+        (14, HolidayKind.NI_ACT),
+        (30, HolidayKind.NI_ACT),
+    }

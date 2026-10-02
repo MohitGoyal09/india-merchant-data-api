@@ -81,7 +81,20 @@ def _marker_kind(cell: Node) -> HolidayKind | None:
     # "Holiday under Negotiable Instruments Act and Real Time Gross Settlement Holiday").
     if glyph == NI_ACT_GLYPH or "negotiable instruments act" in hidden:
         return HolidayKind.NI_ACT
+    if "real time gross settlement" in hidden:
+        # RTGS-only holiday ("◆"): RTGS is closed but banks are open, so it is not a bank
+        # holiday for business-day or settlement purposes. Documented in LIMITATIONS.md.
+        return None
     raise _fail(f"unknown marker {glyph!r} ({hidden or 'no legend text'})")
+
+
+def _is_rtgs_only(cell: Node) -> bool:
+    hidden = " ".join(
+        clean_text(span).lower()
+        for span in cell.css("span")
+        if "HideText" in (span.attributes.get("class") or "")
+    )
+    return "real time gross settlement" in hidden and "negotiable instruments act" not in hidden
 
 
 def _office_slugs(html: str) -> dict[str, str]:
@@ -185,6 +198,8 @@ def _parse_office_list(
         if len(cells) != 3 or month is None:
             raise _fail("office-list row is not 'day, name, marker' under a month header")
         kind, name = _marker_kind(cells[2]), clean_text(cells[1])
+        if kind is None and _is_rtgs_only(cells[2]):
+            continue
         if kind is None or not name:
             raise _fail("office-list row has no marker or no name")
         day = _parse_day(clean_text(cells[0]))
