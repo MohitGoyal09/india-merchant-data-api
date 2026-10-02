@@ -1,4 +1,4 @@
-.PHONY: install fmt lint typecheck test test-live cov check cases serve backfill refresh canary
+.PHONY: install fmt lint typecheck test test-live cov check cases cases-live serve backfill refresh canary docker-build docker-up
 
 install:
 	uv sync --quiet
@@ -28,6 +28,11 @@ check: lint typecheck cov
 cases:
 	uv run python scripts/run_cases.py --offline
 
+# Against a running `make serve` on the real DB. Override with BASE_URL=http://host:port
+BASE_URL ?= http://127.0.0.1:8000
+cases-live:
+	uv run python scripts/run_cases.py --base-url $(BASE_URL)
+
 serve:
 	uv run imda serve
 
@@ -39,3 +44,9 @@ refresh:
 
 canary:
 	uv run imda canary
+
+docker-build:
+	docker build -t imda:dev .
+
+docker-up:
+	docker compose up --build -d api worker

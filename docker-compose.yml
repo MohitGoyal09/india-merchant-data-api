@@ -1,0 +1,37 @@
+# One image, one volume. `api` serves reads; `worker` keeps the data fresh and delivers
+# webhooks. `backfill` is a one-shot: docker compose --profile tools run --rm backfill
+x-imda: &imda
+  image: imda:dev
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    IMDA_DB_PATH: /data/imda.sqlite3
+  volumes:
+    - imda-data:/data
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *imda
+    command: ["imda", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  worker:
+    <<: *imda
+    command: ["imda", "worker"]
+    healthcheck:
+      disable: true  # the image check probes the API port; the worker serves none
+
+  backfill:
+    <<: *imda
+    profiles: ["tools"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    command: ["imda", "backfill", "--from", "2024-01-01"]
+
+volumes:
+  imda-data:
