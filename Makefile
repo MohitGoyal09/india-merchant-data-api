@@ -1,4 +1,4 @@
-.PHONY: install fmt lint typecheck test test-live cov check cases cases-live serve backfill refresh canary docker-build docker-up
+.PHONY: install fmt lint typecheck test test-live cov check cases cases-live agent-demo agent-evals serve backfill refresh canary docker-build docker-up mcp-evals
 
 install:
 	uv sync --quiet
@@ -33,8 +33,22 @@ BASE_URL ?= http://127.0.0.1:8000
 cases-live:
 	uv run python scripts/run_cases.py --base-url $(BASE_URL)
 
+# Needs Claude credentials (ANTHROPIC_API_KEY or `ant auth login`). Opt-in: calls the real API.
+# Runs on the recorded fixtures. make agent-demo Q="What is JPY 1,000 in INR on 24 Sep 2026?"
+Q ?= Is 31 March 2026 a bank holiday in Mumbai?
+agent-demo:
+	uv run python scripts/agent_demo.py --fixtures "$(Q)"
+
+# Layer-2 agent evals. `make agent-evals ARGS=--dry-run` needs no credentials.
+agent-evals:
+	uv run python evals/run_agent_evals.py $(ARGS)
+
 serve:
 	uv run imda serve
+
+# Layer-1 MCP contract evals (no LLM, no network): must be 100%.
+mcp-evals:
+	uv run pytest tests/mcp
 
 backfill:
 	uv run imda backfill --from 2024-01-01

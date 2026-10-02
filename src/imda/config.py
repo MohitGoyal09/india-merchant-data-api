@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     # API
     admin_token: SecretStr | None = None
+    mcp_token: SecretStr | None = None
     max_page_size: int = Field(default=1000, ge=1, le=10_000)
     max_request_body_bytes: int = Field(default=64 * 1024, ge=1024)
     enable_docs: bool = True
@@ -61,6 +62,16 @@ class Settings(BaseSettings):
             return None
         if len(value.get_secret_value()) < MIN_ADMIN_TOKEN_LENGTH:
             raise ValueError(f"admin_token must be at least {MIN_ADMIN_TOKEN_LENGTH} characters")
+        return value
+
+    @field_validator("mcp_token")
+    @classmethod
+    def _mcp_token_strength(cls, value: SecretStr | None) -> SecretStr | None:
+        """Unset or empty disables the MCP HTTP transport; a set token needs 32+ characters."""
+        if value is None or not value.get_secret_value().strip():
+            return None
+        if len(value.get_secret_value()) < MIN_ADMIN_TOKEN_LENGTH:
+            raise ValueError(f"mcp_token must be at least {MIN_ADMIN_TOKEN_LENGTH} characters")
         return value
 
 

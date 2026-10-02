@@ -9,6 +9,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict
+from enum import StrEnum
 from typing import Annotated
 
 import typer
@@ -184,6 +185,62 @@ def serve_command(
 ) -> None:
     """Run the API with uvicorn."""
     uvicorn.run(API_FACTORY, factory=True, host=host, port=port, reload=reload)
+
+
+class McpTransport(StrEnum):
+    STDIO = "stdio"
+    HTTP = "http"
+
+
+MCP_PORT = 8100
+MCP_TOOLSETS_HELP = "Comma list of calendar,settlement,fx,rates,health (default: all)."
+
+
+def _parse_toolsets(value: str | None) -> frozenset[str] | None:
+    from imda.mcp.tools import ALL_TOOLSETS  # lazy: keeps other `imda` commands fast
+
+    if value is None:
+        return None
+    names = frozenset(name.strip().lower() for name in value.split(",") if name.strip())
+    unknown = sorted(names - ALL_TOOLSETS)
+    if unknown or not names:
+        raise typer.BadParameter(
+            f"unknown toolset(s) {unknown or value!r}; "
+            f"choose from {', '.join(sorted(ALL_TOOLSETS))}",
+            param_hint="--toolsets",
+        )
+    return names
+
+
+@app.command("mcp")
+def mcp_command(
+    transport: Annotated[
+        McpTransport, typer.Option(help="stdio for Claude Code/Desktop; http for remote hosts.")
+    ] = McpTransport.STDIO,
+    host: Annotated[str, typer.Option(help="Bind address (http only).")] = DEFAULT_HOST,
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Port (http only).")] = MCP_PORT,
+    toolsets: Annotated[str | None, typer.Option(help=MCP_TOOLSETS_HELP)] = None,
+) -> None:
+    """Run the read-only MCP server (13 tools over the same data as the REST API).
+
+    stdio needs no token. http serves /mcp and needs IMDA_MCP_TOKEN (32+ chars) as Bearer.
+    """
+    from imda.mcp.server import build_http_app, build_server
+
+    settings = get_settings()
+    chosen = _parse_toolsets(toolsets)
+    if transport is McpTransport.HTTP:
+        secret = settings.mcp_token.get_secret_value() if settings.mcp_token else ""
+        if not secret:
+            typer.echo(
+                "error: HTTP transport needs IMDA_MCP_TOKEN (32+ characters) for Bearer auth",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        server = build_server(settings, toolsets=chosen)
+        uvicorn.run(build_http_app(server, secret, host=host), host=host, port=port)
+        return
+    build_server(settings, toolsets=chosen).run("stdio")
 
 
 @app.command("canary")
