@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+  "params": {
+    "fromDate": "2026-09-01",
+    "toDate": "2026-09-30",
+    "authenticated": "false"
+  },
+  "status_code": 200,
+  "content_type": "application/json",
+  "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+  "sha256": "1216f268facba65a747d713cfb7c37d85df7f48bc7d0d476afc2e56fd55c6602",
+  "bytes": 15089
+}

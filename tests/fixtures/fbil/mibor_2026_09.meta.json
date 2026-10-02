@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://www.fbil.org.in/wasdm/ovnmibor/fetchfiltered",
+  "params": {
+    "fromDate": "2026-09-01",
+    "toDate": "2026-09-30",
+    "authenticated": "false"
+  },
+  "status_code": 200,
+  "content_type": "application/json",
+  "fetched_at": "2026-10-02T05:13:23.962722+00:00",
+  "sha256": "5164d339be2ac1c0184c2db0d1ac754fb9252972320474d9eeca1d2ad35b0f23",
+  "bytes": 1818
+}
