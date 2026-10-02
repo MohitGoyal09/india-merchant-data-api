@@ -1,0 +1,619 @@
+{
+  "version": 1,
+  "fixed_now": "2026-09-30T15:00:00+05:30",
+  "cases": [
+    {
+      "id": "usd_invoice_inr_and_settlement",
+      "question": "A customer paid USD 1,200 for an invoice dated 24 September 2026, captured at 11:00 IST that day. What is that in INR at the official reference rate, and when will it settle for a Mumbai merchant?",
+      "required_tools": [
+        "quote_invoice"
+      ],
+      "expect": [
+        {
+          "type": "number",
+          "value": 115091.88,
+          "tolerance": 1.0,
+          "truth": "0:data.conversion.result"
+        },
+        {
+          "type": "regex",
+          "value": "2026-09-28|\\b0?28(?:st|nd|rd|th)?\\s+(?:of\\s+)?Sep(?:tember)?\\b|\\bSep(?:tember)?\\.?\\s+0?28(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "estimate|indicative|expected|approximate|should settle|likely"
+        }
+      ],
+      "notes": "Invoice quote: 1200 x 95.9099 (FBIL, 2026-09-24). T+2 from Thu 24 Sep skips 4th Saturday and Sunday, so ETA Mon 28 Sep.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "POST",
+            "path": "/v1/invoice/quote",
+            "json": {
+              "amount": "1200",
+              "currency": "USD",
+              "invoice_date": "2026-09-24",
+              "captured_at": "2026-09-24T11:00:00+05:30",
+              "office": "mumbai"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.conversion.result",
+              "op": "eq",
+              "value": "115091.88"
+            },
+            {
+              "path": "data.settlement.eta_date",
+              "op": "eq",
+              "value": "2026-09-28"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "USD 1,200 is about INR 1,15,091.88 at the FBIL reference rate of 95.9099 for 24 September 2026. Settlement is estimated for 28 September 2026 (T+2 working days; 26 September is the 4th Saturday and 27 September is a Sunday). This is an estimate based on RBI holidays, not the payment provider's own schedule."
+    },
+    {
+      "id": "mumbai_holiday_mar31",
+      "question": "Are banks in Mumbai open on 31 March 2026? If not, say why.",
+      "required_tools": [
+        "check_business_day"
+      ],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "\\bclosed\\b|holiday|not (?:a )?(?:working|business)|not open"
+        },
+        {
+          "type": "regex",
+          "value": "Mahavir"
+        }
+      ],
+      "notes": "31 Mar 2026 is a Tuesday and an RBI holiday for Mumbai: Mahavir Jayanti.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/calendar/business-day",
+            "params": {
+              "date": "2026-03-31",
+              "office": "mumbai"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.is_business_day",
+              "op": "eq",
+              "value": false
+            },
+            {
+              "path": "data.reason",
+              "op": "contains",
+              "value": "Mahavir"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "No. 31 March 2026 is not a working day for banks in Mumbai. It is a bank holiday for Mahavir Jayanti."
+    },
+    {
+      "id": "t2_settlement_skipped_days",
+      "question": "A payment was captured on 27 March 2026 at 11:00 IST. With a T+2 cycle for a Mumbai merchant, when should it settle, and which days are skipped?",
+      "required_tools": [
+        "estimate_settlement_date"
+      ],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "2026-04-02|\\b0?2(?:st|nd|rd|th)?\\s+(?:of\\s+)?Apr(?:il)?\\b|\\bApr(?:il)?\\.?\\s+0?2(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "Mahavir"
+        },
+        {
+          "type": "regex",
+          "value": "Sunday"
+        },
+        {
+          "type": "regex",
+          "value": "Saturday"
+        },
+        {
+          "type": "regex",
+          "value": "account|\\b0?1(?:st)?\\s+Apr|\\bApr(?:il)?\\.?\\s+0?1\\b|2026-04-01"
+        }
+      ],
+      "notes": "Skipped: 28 Mar (4th Saturday), 29 Mar (Sunday), 31 Mar (Mahavir Jayanti), 1 Apr (closing of accounts). Counted: 30 Mar, 2 Apr.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/settlement/eta",
+            "params": {
+              "captured_at": "2026-03-27T11:00:00+05:30",
+              "office": "mumbai"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.eta_date",
+              "op": "eq",
+              "value": "2026-04-02"
+            },
+            {
+              "path": "data.skipped",
+              "op": "len_eq",
+              "value": 4
+            },
+            {
+              "path": "data.skipped.0.reason",
+              "op": "eq",
+              "value": "4th Saturday"
+            },
+            {
+              "path": "data.skipped.1.reason",
+              "op": "eq",
+              "value": "Sunday"
+            },
+            {
+              "path": "data.skipped.2.reason",
+              "op": "contains",
+              "value": "Mahavir"
+            },
+            {
+              "path": "data.skipped.3.reason",
+              "op": "contains",
+              "value": "closing of accounts"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "The payment should settle on 2 April 2026 (estimate). Working days counted: 30 March and 2 April. Skipped: 28 March (4th Saturday), 29 March (Sunday), 31 March (Mahavir Jayanti holiday) and 1 April (banks' closing of accounts). This is an estimate based on RBI holidays."
+    },
+    {
+      "id": "usd_rate_holiday_fallback",
+      "question": "What is the USD/INR reference rate for 14 September 2026? If there is no rate for that exact day, tell me which day's rate applies and why.",
+      "required_tools": [
+        "fetch_fx_rate"
+      ],
+      "expect": [
+        {
+          "type": "number",
+          "value": 95.7245,
+          "tolerance": 0.001,
+          "truth": "0:data.rate.rate"
+        },
+        {
+          "type": "regex",
+          "value": "2026-09-11|\\b0?11(?:st|nd|rd|th)?\\s+(?:of\\s+)?Sep(?:tember)?\\b|\\bSep(?:tember)?\\.?\\s+0?11(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "Ganesh"
+        }
+      ],
+      "notes": "14 Sep 2026 is Ganesh Chaturthi (Mumbai holiday), so the rate in force is the 11 Sep FBIL rate.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/fx/rates/as-of",
+            "params": {
+              "currency": "USD",
+              "date": "2026-09-14"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.effective_date",
+              "op": "eq",
+              "value": "2026-09-11"
+            },
+            {
+              "path": "data.rate.rate",
+              "op": "eq",
+              "value": "95.7245"
+            },
+            {
+              "path": "data.reason",
+              "op": "contains",
+              "value": "Ganesh Chaturthi"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "There is no rate for 14 September 2026 because it was a bank holiday (Ganesh Chaturthi). The rate from 11 September 2026 applies: USD/INR 95.7245 (FBIL)."
+    },
+    {
+      "id": "jpy_to_inr_per_100_unit",
+      "question": "How many rupees is JPY 1,000 worth on 24 September 2026, using the official reference rate?",
+      "required_tools": [
+        "convert_currency"
+      ],
+      "expect": [
+        {
+          "type": "number",
+          "value": 606.2,
+          "tolerance": 0.05,
+          "truth": "0:data.result"
+        },
+        {
+          "type": "regex",
+          "value": "60,?620",
+          "negate": true
+        }
+      ],
+      "notes": "JPY is quoted per 100 units: 60.62 INR per 100 JPY, so 1000 JPY = 606.20 INR. Answering 60,620 means the unit was missed.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/fx/convert",
+            "params": {
+              "amount": "1000",
+              "from": "JPY",
+              "to": "INR",
+              "date": "2026-09-24"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.result",
+              "op": "eq",
+              "value": "606.20"
+            },
+            {
+              "path": "data.rates_used.0.rate.unit",
+              "op": "eq",
+              "value": 100
+            }
+          ]
+        }
+      ],
+      "golden_answer": "JPY 1,000 is about INR 606.20 on 24 September 2026. The reference rate is INR 60.62 per 100 JPY."
+    },
+    {
+      "id": "next_3_business_days_mumbai",
+      "question": "What are the next 3 bank working days in Mumbai after 27 March 2026?",
+      "required_tools": [
+        "fetch_next_business_days"
+      ],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "2026-03-30|\\b0?30(?:st|nd|rd|th)?\\s+(?:of\\s+)?Mar(?:ch)?\\b|\\bMar(?:ch)?\\.?\\s+0?30(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "2026-04-02|\\b0?2(?:st|nd|rd|th)?\\s+(?:of\\s+)?Apr(?:il)?\\b|\\bApr(?:il)?\\.?\\s+0?2(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "2026-04-04|\\b0?4(?:st|nd|rd|th)?\\s+(?:of\\s+)?Apr(?:il)?\\b|\\bApr(?:il)?\\.?\\s+0?4(?:st|nd|rd|th)?\\b"
+        }
+      ],
+      "notes": "30 Mar, then 2 Apr (31 Mar Mahavir Jayanti and 1 Apr closing of accounts skipped), then Sat 4 Apr (a working Saturday: 1st Saturday).",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/calendar/next-business-days",
+            "params": {
+              "date": "2026-03-27",
+              "office": "mumbai",
+              "n": 3
+            }
+          },
+          "checks": [
+            {
+              "path": "data.dates",
+              "op": "eq",
+              "value": [
+                "2026-03-30",
+                "2026-04-02",
+                "2026-04-04"
+              ]
+            }
+          ]
+        }
+      ],
+      "golden_answer": "The next 3 working days in Mumbai after 27 March 2026 are 30 March, 2 April and 4 April 2026."
+    },
+    {
+      "id": "rbi_vs_fbil_usd_sept",
+      "question": "How much do the RBI and FBIL USD/INR reference rates differ in September 2026?",
+      "required_tools": [
+        "compare_fx_sources"
+      ],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "\\b0(?:\\.0+)?\\s*(?:bps|bp|basis points?)|no (?:difference|discrepanc|divergence)|identical|(?:do not|don't|doesn't|does not) differ|\\bzero\\b|\\bsame\\b|\\bagree|\\bmatch"
+        }
+      ],
+      "notes": "On the 17 overlapping days the two sources match exactly: max difference 0 bps, 0 flagged days.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/fx/compare",
+            "params": {
+              "currency": "USD",
+              "from": "2026-09-01",
+              "to": "2026-09-30"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.summary.max_abs_diff_bps",
+              "op": "num_eq",
+              "value": 0
+            },
+            {
+              "path": "data.summary.flagged_days",
+              "op": "eq",
+              "value": 0
+            },
+            {
+              "path": "data.summary.overlap_days",
+              "op": "eq",
+              "value": 17
+            }
+          ]
+        }
+      ],
+      "golden_answer": "They do not differ. Across the 17 days where both RBI and FBIL published a USD/INR rate in September 2026, the maximum difference is 0 bps and no day is flagged."
+    },
+    {
+      "id": "usd_inr_september_stats",
+      "question": "What was the average USD/INR reference rate in September 2026, and the lowest and highest?",
+      "required_tools": [
+        "fetch_fx_stats"
+      ],
+      "expect": [
+        {
+          "type": "number",
+          "value": 95.46,
+          "tolerance": 0.01,
+          "truth": "0:data.0.mean"
+        },
+        {
+          "type": "number",
+          "value": 94.45,
+          "tolerance": 0.01,
+          "truth": "0:data.0.min"
+        },
+        {
+          "type": "number",
+          "value": 96.03,
+          "tolerance": 0.01,
+          "truth": "0:data.0.max"
+        }
+      ],
+      "notes": "Monthly stats over 21 observations: mean 95.4641, min 94.4467, max 96.0321.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/fx/stats",
+            "params": {
+              "currency": "USD",
+              "period": "month",
+              "from": "2026-09-01",
+              "to": "2026-09-30"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.0.count",
+              "op": "eq",
+              "value": 21
+            },
+            {
+              "path": "data.0.mean",
+              "op": "eq",
+              "value": "95.4641238095"
+            },
+            {
+              "path": "data.0.min",
+              "op": "eq",
+              "value": "94.4467"
+            },
+            {
+              "path": "data.0.max",
+              "op": "eq",
+              "value": "96.0321"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "In September 2026 the average USD/INR reference rate was 95.46 (21 observations). The lowest was 94.45 and the highest was 96.03."
+    },
+    {
+      "id": "mibor_friday_3d_tenor",
+      "question": "What was the FBIL MIBOR on Friday 4 September 2026, and what tenor does that figure cover?",
+      "required_tools": [
+        "fetch_mibor"
+      ],
+      "expect": [
+        {
+          "type": "number",
+          "value": 4.91,
+          "tolerance": 0.005,
+          "truth": "0:data.{date=2026-09-04}.rate"
+        },
+        {
+          "type": "regex",
+          "value": "\\b3\\s?D\\b|3[- ]day|three[- ]day"
+        }
+      ],
+      "notes": "Friday MIBOR is published with a 3D tenor because it spans the weekend: 4.91 on 2026-09-04.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/rates/mibor",
+            "params": {
+              "from": "2026-09-01",
+              "to": "2026-09-30"
+            }
+          },
+          "checks": [
+            {
+              "path": "data.{date=2026-09-04}.rate",
+              "op": "eq",
+              "value": "4.91"
+            },
+            {
+              "path": "data.{date=2026-09-04}.tenor",
+              "op": "eq",
+              "value": "3D"
+            },
+            {
+              "path": "data.{date=2026-09-04}.spans_weekend",
+              "op": "eq",
+              "value": true
+            }
+          ]
+        }
+      ],
+      "golden_answer": "The FBIL MIBOR on Friday 4 September 2026 was 4.91%. It is a 3D (3-day) tenor, because Friday's rate runs over the weekend."
+    },
+    {
+      "id": "mumbai_holidays_april_2026",
+      "question": "List the bank holidays in Mumbai in April 2026.",
+      "required_tools": [
+        "fetch_holidays"
+      ],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "Good Friday"
+        },
+        {
+          "type": "regex",
+          "value": "2026-04-03|\\b0?3(?:st|nd|rd|th)?\\s+(?:of\\s+)?Apr(?:il)?\\b|\\bApr(?:il)?\\.?\\s+0?3(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "Ambedkar"
+        },
+        {
+          "type": "regex",
+          "value": "2026-04-14|\\b0?14(?:st|nd|rd|th)?\\s+(?:of\\s+)?Apr(?:il)?\\b|\\bApr(?:il)?\\.?\\s+0?14(?:st|nd|rd|th)?\\b"
+        },
+        {
+          "type": "regex",
+          "value": "closing|yearly accounts|annual accounts|close their"
+        }
+      ],
+      "notes": "Three entries: 1 Apr (closing of accounts), 3 Apr (Good Friday), 14 Apr (Dr. Babasaheb Ambedkar Jayanti and regional new-year festivals).",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/holidays",
+            "params": {
+              "year": 2026,
+              "office": "mumbai",
+              "month": 4
+            }
+          },
+          "checks": [
+            {
+              "path": "data",
+              "op": "len_eq",
+              "value": 3
+            },
+            {
+              "path": "data.0.date",
+              "op": "eq",
+              "value": "2026-04-01"
+            },
+            {
+              "path": "data.1.name",
+              "op": "eq",
+              "value": "Good Friday"
+            },
+            {
+              "path": "data.2.date",
+              "op": "eq",
+              "value": "2026-04-14"
+            },
+            {
+              "path": "data.2.name",
+              "op": "contains",
+              "value": "Ambedkar"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "Mumbai bank holidays in April 2026: 1 April (banks' closing of accounts), 3 April (Good Friday) and 14 April (Dr. Babasaheb Ambedkar Jayanti and regional new-year festivals)."
+    },
+    {
+      "id": "holidays_2010_not_loaded",
+      "question": "List the bank holidays in Mumbai for 2010.",
+      "required_tools": [
+        "fetch_holidays"
+      ],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "not (?:available|loaded|in (?:the|our|this) (?:data|database))|no (?:holiday )?data|unavailable|\\bmissing\\b|not (?:been )?(?:loaded|ingested|backfilled)|(?:don't|do not|doesn't|does not|can't|cannot|couldn't|could not|unable to) (?:have|find|list|provide|get|retrieve|answer)"
+        },
+        {
+          "type": "regex",
+          "value": "\\b(?:Diwali|Holi|Republic Day|Independence Day|Gandhi Jayanti|Christmas|Good Friday|Dussehra|Eid)\\b",
+          "negate": true
+        }
+      ],
+      "notes": "Recovery case: only 2026 (Mumbai) and 2001 (New Delhi) are loaded. The tool returns CALENDAR_DATA_MISSING. The agent must say the data is not available, and must not invent holidays.",
+      "ground_truth": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/v1/holidays",
+            "params": {
+              "year": 2010,
+              "office": "mumbai"
+            }
+          },
+          "checks": [
+            {
+              "path": "@status",
+              "op": "eq",
+              "value": 409
+            },
+            {
+              "path": "error.code",
+              "op": "eq",
+              "value": "CALENDAR_DATA_MISSING"
+            }
+          ]
+        }
+      ],
+      "golden_answer": "I cannot list the Mumbai bank holidays for 2010. The holiday data for that year is not loaded, so I do not have it, and I will not guess."
+    },
+    {
+      "id": "gst_rate_out_of_scope",
+      "question": "What GST rate applies to cotton t-shirts?",
+      "required_tools": [],
+      "expect": [
+        {
+          "type": "regex",
+          "value": "\\b(?:cannot|can't|can not|unable to|not able to|don't have|do not have|doesn't|does not|no tool|outside|beyond|out of scope|not (?:something|covered|available))\\b"
+        },
+        {
+          "type": "regex",
+          "value": "\\b\\d{1,2}(?:\\.\\d+)?\\s?%",
+          "negate": true
+        }
+      ],
+      "notes": "Out of scope: none of the tools cover GST. The agent must say so and must not guess a rate.",
+      "ground_truth": [],
+      "golden_answer": "I cannot answer that. My tools cover RBI bank holidays, settlement dates, FX reference rates and MIBOR, not GST rates. Please check the GST rate schedule or ask a tax adviser."
+    }
+  ]
+}
