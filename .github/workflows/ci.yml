@@ -15,3 +15,4 @@ jobs:
           python-version: "3.12"
       - run: uv sync --quiet
       - run: make check
+      - run: uv run python scripts/export_tool_spec.py --check
