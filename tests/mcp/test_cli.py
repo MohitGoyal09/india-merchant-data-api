@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,15 @@ import imda.cli as cli
 from imda.config import Settings
 from imda.mcp.auth import BearerAuthMiddleware
 
-runner = CliRunner()
+# Rich adds ANSI colours and wraps error boxes on CI terminals; keep output plain and wide.
+runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "200"})
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(output: str) -> str:
+    return _ANSI.sub("", output)
+
+
 TOKEN = "k" * 36
 
 
@@ -142,7 +151,7 @@ def test_non_loopback_host_without_allowed_host_exits_2(
     result = runner.invoke(cli.app, ["mcp", "--transport", "http", "--host", host])
 
     assert result.exit_code == 2
-    assert "--allowed-host" in result.output
+    assert "--allowed-host" in plain(result.output)
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "127.0.0.2"])
@@ -160,7 +169,7 @@ def test_malformed_allowed_host_is_a_usage_error(served: dict[str, Any], bad: st
     )
 
     assert result.exit_code == 2
-    assert "--allowed-host" in result.output
+    assert "--allowed-host" in plain(result.output)
 
 
 def test_non_loopback_with_allowed_host_starts_and_warns_about_tls(
