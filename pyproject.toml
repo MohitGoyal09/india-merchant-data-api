@@ -13,10 +13,16 @@ dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "typer>=0.12",
+    "mcp>=2.2,<3",
 ]
 
 [project.scripts]
 imda = "imda.cli:app"
+
+[project.optional-dependencies]
+agent = [
+    "anthropic>=1.11,<2",
+]
 
 [dependency-groups]
 dev = [
@@ -25,6 +31,7 @@ dev = [
     "respx>=0.21",
     "ruff>=0.6",
     "mypy>=1.11",
+    "anthropic>=1.11,<2",
 ]
 
 [build-system]
