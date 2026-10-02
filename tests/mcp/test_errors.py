@@ -85,6 +85,16 @@ async def fail(client: Client, name: str, **arguments: Any) -> dict[str, Any]:
             "INVALID_REQUEST",
         ),
         (
+            "convert_currency",
+            {"amount": True, "from_currency": "USD", "to_currency": "INR", "date": "2026-09-14"},
+            "INVALID_REQUEST",
+        ),
+        (
+            "convert_currency",
+            {"amount": 12.345, "from_currency": "USD", "to_currency": "INR", "date": "2026-09-14"},
+            "VALIDATION_ERROR",
+        ),
+        (
             "estimate_settlement_date",
             {"captured_at": "2026-03-27T11:00:00", "office": "mumbai"},
             "INVALID_REQUEST",

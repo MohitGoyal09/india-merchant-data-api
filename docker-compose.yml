@@ -19,7 +19,7 @@ services:
     <<: *imda
     command: ["imda", "serve", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${IMDA_API_PORT:-8000}:8000"  # override if 8000 is taken
 
   worker:
     <<: *imda
@@ -40,7 +40,7 @@ services:
     profiles: ["mcp"]
     environment:
       IMDA_DB_PATH: /data/imda.sqlite3
-      IMDA_MCP_TOKEN: ${IMDA_MCP_TOKEN:?set IMDA_MCP_TOKEN (32+ characters) to run the mcp service}
+      IMDA_MCP_TOKEN: ${IMDA_MCP_TOKEN:-}  # required: `imda mcp --transport http` exits 2 without it
     command: ["imda", "mcp", "--transport", "http", "--host", "0.0.0.0", "--port", "8100",
               "--allowed-host", "127.0.0.1:8100", "--allowed-host", "localhost:8100"]
     ports:

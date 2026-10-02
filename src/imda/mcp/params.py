@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BeforeValidator, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BeforeValidator,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    TypeAdapter,
+    ValidationError,
+)
 
 from imda.api.deps import AmountText, AwareDatetime, ConvertCurrency, CurrencyCode, IsoDate
 from imda.api.routes.fx import decode_cursor
@@ -66,9 +75,29 @@ def parse_aware_datetime(field: str, value: str) -> dt.datetime:
     return _parse(_AWARE, field, value)
 
 
-def parse_amount(field: str, value: str) -> Decimal:
-    """A decimal string. Sign and decimal places are checked by the domain (VALIDATION_ERROR)."""
-    return _parse(_AMOUNT, field, value)
+AmountInput = StrictStr | StrictInt | StrictFloat
+AMOUNT_DESCRIPTION = (
+    "Positive amount with at most 2 decimal places. Prefer a decimal string, e.g. '1200.00'; "
+    "a JSON number such as 1200 is also accepted."
+)
+"""Hosts differ: some send amounts as JSON numbers. A decimal string is preferred (exact)."""
+
+
+def parse_amount(field: str, value: AmountInput) -> Decimal:
+    """A decimal string or a JSON number. Sign and decimal places are checked by the domain."""
+    if isinstance(value, bool):
+        raise invalid_request(
+            f"{field}: must be a decimal amount, not a boolean",
+            "Send the amount as a decimal string, e.g. '1200.00'.",
+        )
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise invalid_request(
+                f"{field}: must be a finite number",
+                "Send the amount as a decimal string, e.g. '1200.00'.",
+            )
+        value = format(Decimal(repr(value)), "f")
+    return _parse(_AMOUNT, field, str(value))
 
 
 def parse_currency(field: str, value: str) -> Currency:
@@ -101,6 +130,8 @@ def normalise_office(value: str) -> str:
 
 
 __all__ = [
+    "AMOUNT_DESCRIPTION",
+    "AmountInput",
     "AnyCurrency",
     "ForeignCurrency",
     "McpToolError",

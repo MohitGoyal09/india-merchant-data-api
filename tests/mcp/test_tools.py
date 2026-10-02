@@ -432,3 +432,29 @@ async def test_text_content_has_a_summary_and_the_data(client: Client) -> None:
     assert "2026-04-02" in summary
     assert "estimate" in summary.lower()
     assert '"eta_date":"2026-04-02"' in body
+
+
+@pytest.mark.parametrize("amount", [1200, 1200.0, "1200", "1200.00"])
+async def test_amount_accepts_json_numbers_and_strings(client: Client, amount: object) -> None:
+    # Found with the MCP Inspector CLI: some hosts send `amount` as a JSON number.
+    result = await ok(
+        client,
+        "convert_currency",
+        amount=amount,
+        from_currency="USD",
+        to_currency="INR",
+        date="2026-09-14",
+    )
+    assert (
+        result["result"]
+        == (
+            await ok(
+                client,
+                "convert_currency",
+                amount="1200.00",
+                from_currency="USD",
+                to_currency="INR",
+                date="2026-09-14",
+            )
+        )["result"]
+    )

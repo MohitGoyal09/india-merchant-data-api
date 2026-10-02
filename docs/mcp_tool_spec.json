@@ -409,9 +409,19 @@
       "input_schema": {
         "properties": {
           "amount": {
-            "description": "Positive decimal string, e.g. '1200.00'.",
-            "title": "Amount",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Positive amount with at most 2 decimal places. Prefer a decimal string, e.g. '1200.00'; a JSON number such as 1200 is also accepted.",
+            "title": "Amount"
           },
           "date": {
             "description": "Rate date, e.g. '2025-12-24'.",
@@ -2615,9 +2625,19 @@
       "input_schema": {
         "properties": {
           "amount": {
-            "description": "Positive decimal string, e.g. '1200.00'.",
-            "title": "Amount",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Positive amount with at most 2 decimal places. Prefer a decimal string, e.g. '1200.00'; a JSON number such as 1200 is also accepted.",
+            "title": "Amount"
           },
           "captured_at": {
             "anyOf": [

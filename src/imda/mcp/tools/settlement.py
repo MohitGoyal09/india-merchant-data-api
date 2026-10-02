@@ -17,6 +17,8 @@ from imda.domain.invoice import quote_invoice
 from imda.domain.settlement import SettlementEstimate, SettlementMode, estimate_settlement
 from imda.mcp.context import Draft, ToolEnv, require_office, run_tool
 from imda.mcp.params import (
+    AMOUNT_DESCRIPTION,
+    AmountInput,
     ForeignCurrency,
     parse_amount,
     parse_aware_datetime,
@@ -105,7 +107,7 @@ def _estimate(
 
 def _quote(
     rc: RequestContext,
-    amount: str,
+    amount: AmountInput,
     currency: str,
     invoice_date: str,
     office: str,
@@ -198,7 +200,10 @@ def register(server: MCPServer, env: ToolEnv) -> None:
         annotations=READ_ONLY,
     )
     def quote_invoice_tool(
-        amount: Annotated[str, Field(description="Positive decimal string, e.g. '1200.00'.")],
+        amount: Annotated[
+            AmountInput,
+            Field(description=AMOUNT_DESCRIPTION),
+        ],
         currency: ForeignCurrency,
         invoice_date: Annotated[str, Field(description="Invoice date, e.g. '2025-12-24'.")],
         office: Annotated[str, Field(description="Office slug, e.g. 'mumbai'.")],

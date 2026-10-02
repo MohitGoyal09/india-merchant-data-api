@@ -25,6 +25,8 @@ from imda.domain.fx_service import AsOfResult, Period, SourceChoice, check_range
 from imda.mcp.context import Draft, ToolEnv, run_tool
 from imda.mcp.errors import RANGE_TOO_LARGE, McpToolError, invalid_request
 from imda.mcp.params import (
+    AMOUNT_DESCRIPTION,
+    AmountInput,
     AnyCurrency,
     ForeignCurrency,
     Source,
@@ -198,7 +200,7 @@ def _rates(
 
 def _convert(
     rc: RequestContext,
-    amount: str,
+    amount: AmountInput,
     from_currency: str,
     to_currency: str,
     date: str,
@@ -361,7 +363,10 @@ def register(server: MCPServer, env: ToolEnv) -> None:
         annotations=READ_ONLY,
     )
     def convert_currency(
-        amount: Annotated[str, Field(description="Positive decimal string, e.g. '1200.00'.")],
+        amount: Annotated[
+            AmountInput,
+            Field(description=AMOUNT_DESCRIPTION),
+        ],
         from_currency: AnyCurrency,
         to_currency: AnyCurrency,
         date: Annotated[str, Field(description="Rate date, e.g. '2025-12-24'.")],
