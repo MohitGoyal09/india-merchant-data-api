@@ -1,12 +1,15 @@
-"""Layer-2 agent evals: 12 merchant questions answered by Claude through the MCP server.
+"""Layer-2 agent evals: 16 merchant questions answered by Claude through the MCP server.
 
 uv run python evals/run_agent_evals.py --dry-run          # no Claude call: validate the case file
 uv run python evals/run_agent_evals.py                    # run all cases (needs credentials)
 uv run python evals/run_agent_evals.py --filter holiday --model claude-opus-5-5 --json out.json
+uv run python evals/run_agent_evals.py --bar 0.92         # share of cases that must pass
 
 Scoring is deterministic (no LLM judge). A case passes when (a) every required tool was called and
-no forbidden tool was, and (b) every check in ``expect`` holds for the final answer. The bar is
-11 of 12 cases. Cases run against the recorded-fixture DB with the MCP server clock fixed.
+no forbidden tool was, and (b) every check in ``expect`` holds for the final answer. The bar is a
+share of cases (default 92%, rounded up to whole cases: 15 of 16). Every case has a category; the
+summary prints the pass rate per category. Cases run against the recorded-fixture DB (or, for
+``"db": "adversarial"``, the fixture DB plus one injected holiday) with the server clock fixed.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import math
 import re
 import sys
 import tempfile
@@ -45,13 +49,12 @@ from imda.agent import (  # noqa: E402
     run_agent,
 )
 from run_cases import evaluate, resolve  # noqa: E402
-from seed_fixtures import seed  # noqa: E402
+from seed_fixtures import seed, seed_adversarial  # noqa: E402
 
 CASES_PATH: Final = Path(__file__).resolve().parent / "agent_cases.json"
 RESULTS_DIR: Final = Path(__file__).resolve().parent / "results"
 
-BAR_PASSED: Final = 11
-BAR_TOTAL: Final = 12
+DEFAULT_BAR: Final = 0.92
 DEFAULT_TOLERANCE: Final = 0.01
 EXIT_BELOW_BAR: Final = 1
 EXIT_NO_CREDENTIALS: Final = 2
@@ -80,6 +83,23 @@ TOOL_NAMES: Final = frozenset(
     }
 )
 CHECK_TYPES: Final = ("contains", "regex", "number")
+CATEGORIES: Final = (
+    "fx",
+    "settlement",
+    "calendar",
+    "invoice",
+    "rates",
+    "comparison",
+    "error_recovery",
+    "out_of_scope",
+    "safety",
+)
+DEFAULT_DB: Final = "fixture"
+# Which seeder builds the DB a case runs against.
+DB_SEEDERS: Final[Mapping[str, Callable[[Path], object]]] = {
+    DEFAULT_DB: seed,
+    "adversarial": seed_adversarial,
+}
 _CASE_ID = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 _TRUTH_REF = re.compile(r"^(?P<index>\d+):(?P<path>.+)$")
 # Digits with optional thousands (1,200) or lakh (1,15,091) separators and a decimal part.
@@ -126,6 +146,7 @@ class GroundTruth:
 @dataclass(frozen=True)
 class AgentCase:
     id: str
+    category: str
     question: str
     required_tools: tuple[str, ...]
     forbidden_tools: tuple[str, ...]
@@ -133,6 +154,7 @@ class AgentCase:
     notes: str
     ground_truth: tuple[GroundTruth, ...]
     golden_answer: str
+    db: str = DEFAULT_DB
 
 
 @dataclass(frozen=True)
@@ -230,6 +252,12 @@ def _parse_case(raw: Any, index: int, seen: set[str], problems: list[str]) -> Ag
     question = raw.get("question")
     if not isinstance(question, str) or not question.strip():
         problems.append(f"{where}: question must be a non-empty string")
+    category = raw.get("category")
+    if category not in CATEGORIES:
+        problems.append(f"{where}: category must be one of {', '.join(CATEGORIES)}")
+    db = raw.get("db", DEFAULT_DB)
+    if db not in DB_SEEDERS:
+        problems.append(f"{where}: db must be one of {', '.join(DB_SEEDERS)}")
     required = _tool_list(raw.get("required_tools"), "required_tools", where, problems)
     if "required_tools" not in raw:
         problems.append(f"{where}: required_tools is missing (use [] for none)")
@@ -258,6 +286,8 @@ def _parse_case(raw: Any, index: int, seen: set[str], problems: list[str]) -> Ag
         return None
     return AgentCase(
         id=case_id,
+        category=str(category),
+        db=str(db),
         question=question,
         required_tools=required,
         forbidden_tools=forbidden,
@@ -383,6 +413,8 @@ class CaseResult:
         run = self.run
         return {
             "id": self.case.id,
+            "category": self.case.category,
+            "db": self.case.db,
             "question": self.case.question,
             "passed": self.passed,
             "tools_ok": self.score.tools_ok,
@@ -424,16 +456,35 @@ def estimate_cost(usage: TokenUsage) -> float:
     ) / 1_000_000
 
 
-def summarize(results: Sequence[CaseResult]) -> dict[str, Any]:
+def required_passes(total: int, bar: float) -> int:
+    """Cases that must pass to meet ``bar`` (0 to 1): bar x total, rounded up."""
+    return math.ceil(Decimal(str(bar)) * total)
+
+
+def _category_summary(results: Sequence[CaseResult]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    names = [c for c in CATEGORIES if any(r.case.category == c for r in results)]
+    names += sorted({r.case.category for r in results} - set(CATEGORIES))
+    for name in names:
+        group = [r for r in results if r.case.category == name]
+        passed = sum(r.passed for r in group)
+        out[name] = {"total": len(group), "passed": passed, "pass_rate": passed / len(group)}
+    return out
+
+
+def summarize(results: Sequence[CaseResult], bar: float = DEFAULT_BAR) -> dict[str, Any]:
     total = len(results)
     passed = sum(r.passed for r in results)
+    needed = required_passes(total, bar)
     usage = sum((r.run.usage for r in results), TokenUsage())
     return {
         "total": total,
         "passed": passed,
         "pass_rate": passed / total if total else 0.0,
-        "bar": f"{BAR_PASSED}/{BAR_TOTAL}",
-        "meets_bar": total > 0 and passed * BAR_TOTAL >= BAR_PASSED * total,
+        "bar": f"{needed}/{total}",
+        "bar_share": bar,
+        "meets_bar": total > 0 and passed >= needed,
+        "categories": _category_summary(results),
         "tool_selection_accuracy": sum(r.score.tools_ok for r in results) / total if total else 0.0,
         "avg_tool_calls": sum(len(r.run.tool_calls) for r in results) / total if total else 0.0,
         "input_tokens": usage.input_tokens,
@@ -481,24 +532,34 @@ def render_results(results: Sequence[CaseResult]) -> str:
 
 def render_summary(summary: Mapping[str, Any]) -> str:
     verdict = "MEETS BAR" if summary["meets_bar"] else "BELOW BAR"
-    return "\n".join(
-        [
-            f"pass rate           {summary['passed']}/{summary['total']} "
-            f"({summary['pass_rate']:.0%}); bar {summary['bar']}: {verdict}",
-            f"tool selection      {summary['tool_selection_accuracy']:.0%}",
-            f"avg tool calls      {summary['avg_tool_calls']:.1f}",
-            f"tokens              {summary['input_tokens']} input, "
-            f"{summary['output_tokens']} output "
-            f"(+{summary['cache_creation_input_tokens']} cache write, "
-            f"{summary['cache_read_input_tokens']} cache read)",
-            f"estimated cost      ${summary['estimated_cost_usd']:.2f} at ${PRICE_INPUT:.0f}/"
-            f"${PRICE_OUTPUT:.0f} per MTok",
-        ]
-    )
+    lines = [
+        f"pass rate           {summary['passed']}/{summary['total']} "
+        f"({summary['pass_rate']:.0%}); bar {summary['bar']} "
+        f"(>= {summary['bar_share']:.0%}): {verdict}",
+    ]
+    for name, stats in summary["categories"].items():
+        lines.append(f"  {name:<18}{stats['passed']}/{stats['total']} ({stats['pass_rate']:.0%})")
+    lines += [
+        f"tool selection      {summary['tool_selection_accuracy']:.0%}",
+        f"avg tool calls      {summary['avg_tool_calls']:.1f}",
+        f"tokens              {summary['input_tokens']} input, "
+        f"{summary['output_tokens']} output "
+        f"(+{summary['cache_creation_input_tokens']} cache write, "
+        f"{summary['cache_read_input_tokens']} cache read)",
+        f"estimated cost      ${summary['estimated_cost_usd']:.2f} at ${PRICE_INPUT:.0f}/"
+        f"${PRICE_OUTPUT:.0f} per MTok",
+    ]
+    return "\n".join(lines)
 
 
 def results_document(
-    results: Sequence[CaseResult], *, model: str, effort: str, fallback: bool, fixed_now: str
+    results: Sequence[CaseResult],
+    *,
+    model: str,
+    effort: str,
+    fallback: bool,
+    fixed_now: str,
+    bar: float = DEFAULT_BAR,
 ) -> dict[str, Any]:
     return {
         "timestamp": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
@@ -506,7 +567,7 @@ def results_document(
         "effort": effort,
         "fallback": fallback,
         "fixed_now": fixed_now,
-        "summary": summarize(results),
+        "summary": summarize(results, bar),
         "cases": [r.to_json() for r in results],
     }
 
@@ -549,28 +610,38 @@ def _truth_problems(case: AgentCase, responses: Sequence[Any]) -> list[str]:
     return problems
 
 
-def verify_case_file(case_file: CaseFile) -> list[str]:
-    """Check expected values against the fixture DB (REST layer) and every golden answer
-    against its own checks. Returns problems; empty means the file is sound."""
+def _truth_problems_for_db(kind: str, cases: Sequence[AgentCase], now: dt.datetime) -> list[str]:
+    """Run each case's ground-truth requests on a DB seeded for ``kind``."""
     from fastapi.testclient import TestClient
 
     from imda.api.app import create_app
     from imda.config import Settings
 
-    now = dt.datetime.fromisoformat(case_file.fixed_now)
     problems: list[str] = []
     with tempfile.TemporaryDirectory(prefix="imda-agent-evals-") as tmp:
         db_path = Path(tmp) / "imda.sqlite3"
-        seed(db_path)
+        DB_SEEDERS[kind](db_path)
         app = create_app(Settings(db_path=db_path, _env_file=None), now=lambda: now)
         logging.getLogger("imda.api.access").disabled = True
         with TestClient(app) as client:
-            for case in case_file.cases:
+            for case in cases:
                 responses = [
                     client.request(t.method, t.path, params=t.params, json=t.json)
                     for t in case.ground_truth
                 ]
                 problems += _truth_problems(case, responses)
+    return problems
+
+
+def verify_case_file(case_file: CaseFile) -> list[str]:
+    """Check expected values against the DB each case runs on (REST layer) and every golden
+    answer against its own checks. Returns problems; empty means the file is sound."""
+    now = dt.datetime.fromisoformat(case_file.fixed_now)
+    problems: list[str] = []
+    for kind in DB_SEEDERS:
+        cases = [c for c in case_file.cases if c.db == kind]
+        if cases:
+            problems += _truth_problems_for_db(kind, cases, now)
     for case in case_file.cases:
         failed = score_answer(case, case.required_tools, case.golden_answer).failed_checks
         problems += [f"{case.id}: golden answer fails check: {text}" for text in failed]
@@ -583,6 +654,8 @@ def render_dry_run(case_file: CaseFile, problems: Sequence[str]) -> str:
         (
             str(n),
             case.id,
+            case.category,
+            case.db,
             ", ".join(case.required_tools) or "-",
             str(len(case.expect)),
             str(len(case.ground_truth)),
@@ -590,8 +663,8 @@ def render_dry_run(case_file: CaseFile, problems: Sequence[str]) -> str:
         )
         for n, case in enumerate(case_file.cases, start=1)
     ]
-    header = ("#", "case", "required tools", "checks", "truth calls", "verified")
-    out = _table(header, rows, right=(0, 3, 4))
+    header = ("#", "case", "category", "db", "required tools", "checks", "truth calls", "verified")
+    out = _table(header, rows, right=(0, 5, 6))
     out += [f"  - {problem}" for problem in problems]
     return "\n".join(out)
 
@@ -651,21 +724,49 @@ async def _run_all(
     backend_factory: BackendFactory,
     args: argparse.Namespace,
 ) -> list[CaseResult]:
+    """Run ``cases`` with one seeded DB and one backend per DB kind they use.
+
+    Results come back in the order of ``cases``, whatever the DB mix.
+    """
+    done = 0
+
+    def progress(_number: int, _total: int, result: CaseResult) -> None:
+        nonlocal done
+        done += 1
+        _progress(done, len(cases), result)
+
+    by_id: dict[str, CaseResult] = {}
     with tempfile.TemporaryDirectory(prefix="imda-agent-evals-") as tmp:
-        db_path = Path(tmp) / "imda.sqlite3"
-        seed(db_path)
-        async with backend_factory(db_path, case_file.fixed_now) as backend:
-            return await run_cases(
-                cases,
-                backend,
-                client,
-                model=args.model,
-                effort=args.effort,
-                fallback=not args.no_fallback,
-                max_turns=args.max_turns,
-                system=build_system_prompt(case_file.fixed_now),
-                on_result=_progress,
-            )
+        for kind in DB_SEEDERS:
+            group = [c for c in cases if c.db == kind]
+            if not group:
+                continue
+            db_path = Path(tmp) / f"{kind}.sqlite3"
+            DB_SEEDERS[kind](db_path)
+            async with backend_factory(db_path, case_file.fixed_now) as backend:
+                results = await run_cases(
+                    group,
+                    backend,
+                    client,
+                    model=args.model,
+                    effort=args.effort,
+                    fallback=not args.no_fallback,
+                    max_turns=args.max_turns,
+                    system=build_system_prompt(case_file.fixed_now),
+                    on_result=progress,
+                )
+            by_id.update({r.case.id: r for r in results})
+    return [by_id[c.id] for c in cases]
+
+
+def _bar_share(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
+    if not 0.0 <= value <= 1.0:
+        raise argparse.ArgumentTypeError("must be between 0 and 1 (for example 0.92)")
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -679,6 +780,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-fallback", action="store_true", help="turn off refusal fallback")
     parser.add_argument("--json", type=Path, metavar="FILE", help="also write the results here")
     parser.add_argument("--dry-run", action="store_true", help="validate cases; no Claude call")
+    parser.add_argument(
+        "--bar",
+        type=_bar_share,
+        default=DEFAULT_BAR,
+        metavar="SHARE",
+        help="share of cases that must pass, 0 to 1 (default 0.92: 15 of 16)",
+    )
     parser.add_argument("--cases", type=Path, default=CASES_PATH, help="case file to use")
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
     return parser
@@ -726,6 +834,7 @@ def main(
         effort=args.effort,
         fallback=not args.no_fallback,
         fixed_now=case_file.fixed_now,
+        bar=args.bar,
     )
     paths = write_results(document, args.results_dir, args.json)
     print(render_results(results))
@@ -745,6 +854,7 @@ __all__ = [
     "load_case_file",
     "main",
     "parse_case_file",
+    "required_passes",
     "score_answer",
 ]
 
