@@ -237,5 +237,17 @@ Design and data flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - The client sends an honest User-Agent and never gets around bot protection, captchas or logins. Upstream load is bounded: 1 request every 2 seconds per host, a request budget, a circuit breaker and a kill switch.
 - Webhook targets must be `https` and must not resolve to private, loopback or link-local addresses. Deliveries are HMAC-signed with a timestamp. The API binds to `127.0.0.1` by default.
 
-## Phase 2
-An MCP server is coming next. It will expose the same data as tools for Razorpay Agent Studio agents (settlement ETA, FX as-of, invoice quote, source health). It is not part of this submission.
+## MCP connector (Agent Studio)
+`imda mcp` runs a read-only [MCP](https://modelcontextprotocol.io) server with 13 tools over the same data as the REST API. An AI agent, such as a Razorpay Agent Studio agent, can use them to answer "Is 2 October a bank holiday in Chennai?" or "What is USD 1,250.50 in INR, and when does it settle in Mumbai?".
+
+```bash
+uv run imda mcp                                                        # stdio (Claude Code, Desktop)
+IMDA_MCP_TOKEN=<32+ chars> uv run imda mcp --transport http --port 8100   # streamable HTTP at /mcp, bearer token
+make mcp-evals                                                         # 152 offline contract tests
+```
+
+Every result has a summary line, JSON, `provenance` and `warnings`. Errors are results with `isError=true` and a `{code, message, hint}` body. The agent cannot write data, cannot call RBI or FBIL, and gives settlement dates as estimates.
+
+- [docs/MCP.md](docs/MCP.md): tools, host configs, errors, and what the agent can and cannot do.
+- [docs/mcp_tool_spec.json](docs/mcp_tool_spec.json): the tool spec, generated from the live server.
+- [docs/PLAN_MCP.md](docs/PLAN_MCP.md): design decisions and the eval plan.
