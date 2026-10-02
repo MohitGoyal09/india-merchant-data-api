@@ -1,0 +1,2684 @@
+{
+  "components": {
+    "schemas": {
+      "Currency": {
+        "enum": [
+          "USD",
+          "GBP",
+          "EUR",
+          "JPY",
+          "AED",
+          "IDR"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "description": "Shape of every error response.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "request_id"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "InvoiceQuoteRequest": {
+        "additionalProperties": false,
+        "description": "Body of ``POST /v1/invoice/quote``.",
+        "example": {
+          "amount": "1250.50",
+          "captured_at": "2026-09-30T11:00:00+05:30",
+          "currency": "USD",
+          "invoice_date": "2026-09-30",
+          "office": "mumbai"
+        },
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "examples": [
+              "1250.50"
+            ],
+            "title": "Amount",
+            "type": "string"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "cycle_days": {
+            "anyOf": [
+              {
+                "maximum": 30.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cycle Days"
+          },
+          "invoice_date": {
+            "format": "date",
+            "title": "Invoice Date",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SettlementMode",
+            "default": "working_days"
+          },
+          "office": {
+            "title": "Office",
+            "type": "string"
+          },
+          "source": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "rbi",
+              "fbil"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "invoice_date",
+          "office"
+        ],
+        "title": "InvoiceQuoteRequest",
+        "type": "object"
+      },
+      "SettlementMode": {
+        "enum": [
+          "working_days",
+          "calendar_then_roll"
+        ],
+        "title": "SettlementMode",
+        "type": "string"
+      },
+      "WebhookIn": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "description": "Any of fx.rates.published, holidays.updated, source.degraded, source.recovered, or '*' for all",
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "url": {
+            "description": "https URL that receives events",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "WebhookIn",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "Admin token from IMDA_ADMIN_TOKEN, sent as a Bearer token.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "RBI bank holidays, RBI/FBIL FX reference rates, MIBOR, settlement ETA and invoice quotes as one typed API. Data is served from a local store filled by `imda backfill` / `imda refresh`; every response carries provenance. Not affiliated with RBI, FBIL or Razorpay.",
+    "title": "India Merchant Data API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "index__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Index  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Service links",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Liveness (no database access)",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/admin/refresh": {
+      "post": {
+        "operationId": "trigger_refresh_v1_admin_refresh_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid admin token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Admin endpoints are disabled (no token set)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start an incremental refresh in the background",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/webhooks/dispatch": {
+      "post": {
+        "operationId": "dispatch_webhooks_v1_admin_webhooks_dispatch_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid admin token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Admin endpoints are disabled (no token set)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run one webhook delivery pass now",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/calendar/business-day": {
+      "get": {
+        "operationId": "business_day_v1_calendar_business_day_get",
+        "parameters": [
+          {
+            "description": "YYYY-MM-DD",
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "description": "YYYY-MM-DD",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Office slug, e.g. mumbai",
+            "in": "query",
+            "name": "office",
+            "required": true,
+            "schema": {
+              "description": "Office slug, e.g. mumbai",
+              "title": "Office",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "date": "2026-03-28",
+                    "is_business_day": false,
+                    "office": "mumbai",
+                    "reason": "4th Saturday",
+                    "weekday": "Saturday"
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "holidays",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "rbi",
+                      "source_url": "https://www.rbi.org.in/Scripts/HolidayMatrixDisplay.aspx",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Is a date a working day for an office?",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/next-business-days": {
+      "get": {
+        "operationId": "next_business_days_v1_calendar_next_business_days_get",
+        "parameters": [
+          {
+            "description": "Start date (exclusive), YYYY-MM-DD",
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "description": "Start date (exclusive), YYYY-MM-DD",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Office slug, e.g. mumbai",
+            "in": "query",
+            "name": "office",
+            "required": true,
+            "schema": {
+              "description": "Office slug, e.g. mumbai",
+              "title": "Office",
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many days",
+            "in": "query",
+            "name": "n",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "How many days",
+              "maximum": 31,
+              "minimum": 1,
+              "title": "N",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "after": "2026-03-27",
+                    "dates": [
+                      "2026-03-30",
+                      "2026-04-01"
+                    ],
+                    "n": 2,
+                    "office": "mumbai"
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "holidays",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "rbi",
+                      "source_url": "https://www.rbi.org.in/Scripts/HolidayMatrixDisplay.aspx",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "The next N working days after a date",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/calendar/{office}.ics": {
+      "get": {
+        "operationId": "calendar_feed_v1_calendar__office__ics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "office",
+            "required": true,
+            "schema": {
+              "title": "Office",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Calendar year",
+            "in": "query",
+            "name": "year",
+            "required": true,
+            "schema": {
+              "description": "Calendar year",
+              "maximum": 2100,
+              "minimum": 2001,
+              "title": "Year",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Also add the 2nd and 4th Saturdays",
+            "in": "query",
+            "name": "include_weekly_off",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also add the 2nd and 4th Saturdays",
+              "title": "Include Weekly Off",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/calendar": {
+                "example": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n..."
+              }
+            },
+            "description": "RFC 5545 calendar, one all-day event per holiday"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Subscribable iCalendar feed of RBI holidays",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/v1/fx/compare": {
+      "get": {
+        "description": "Differences are FBIL minus RBI on per-unit rates; flagged above 1 bp.",
+        "operationId": "fx_compare_v1_fx_compare_get",
+        "parameters": [
+          {
+            "description": "USD, GBP, EUR, JPY, AED or IDR",
+            "in": "query",
+            "name": "currency",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Currency",
+              "description": "USD, GBP, EUR, JPY, AED or IDR"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "currency": "USD",
+                    "from": "2018-07-10",
+                    "rows": [
+                      {
+                        "date": "2018-07-10",
+                        "diff": "0.0",
+                        "diff_bps": "0.0000",
+                        "fbil": "68.4",
+                        "flagged": false,
+                        "rbi": "68.4"
+                      }
+                    ],
+                    "summary": {
+                      "fbil_only_days": 0,
+                      "flagged_days": 0,
+                      "max_abs_diff_bps": "0.0000",
+                      "overlap_days": 11,
+                      "rbi_only_days": 0
+                    },
+                    "to": "2018-07-24"
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "RBI against FBIL on overlapping dates",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/v1/fx/convert": {
+      "get": {
+        "description": "One side must be INR (or both foreign: crossed through INR). `result` is rounded to 0.01 half-up; `exact` is unrounded. The rate is the as-of rate for `date`.",
+        "operationId": "fx_convert_v1_fx_convert_get",
+        "parameters": [
+          {
+            "description": "Positive, at most 2 decimal places",
+            "in": "query",
+            "name": "amount",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "description": "Positive, at most 2 decimal places",
+              "title": "Amount"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "maxLength": 3,
+              "minLength": 3,
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "maxLength": 3,
+              "minLength": 3,
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "description": "YYYY-MM-DD",
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "description": "YYYY-MM-DD",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+              "enum": [
+                "auto",
+                "rbi",
+                "fbil"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "amount": "100.00",
+                    "exact": "8831.2500",
+                    "from": "USD",
+                    "is_cross_rate": false,
+                    "rates_used": [
+                      {
+                        "currency": "USD",
+                        "effective_date": "2026-09-30",
+                        "lag_days": 0,
+                        "rate": {
+                          "currency": "USD",
+                          "date": "2026-09-30",
+                          "published_at": "2026-09-30T12:30:00+05:30",
+                          "rate": "88.3125",
+                          "rate_per_unit": "88.3125",
+                          "source": "fbil",
+                          "unit": 1
+                        },
+                        "requested_date": "2026-09-30"
+                      }
+                    ],
+                    "result": "8831.25",
+                    "to": "INR"
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Convert between INR and a foreign currency",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/v1/fx/rates": {
+      "get": {
+        "description": "Oldest first, one row per date. JSON is paginated with an opaque `cursor`; CSV (`format=csv` or `Accept: text/csv`) returns the whole range, capped at 10 years. `rate` is INR for `unit` units of the currency; `rate_per_unit` is INR for one.",
+        "operationId": "fx_rates_v1_fx_rates_get",
+        "parameters": [
+          {
+            "description": "USD, GBP, EUR, JPY, AED or IDR",
+            "in": "query",
+            "name": "currency",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Currency",
+              "description": "USD, GBP, EUR, JPY, AED or IDR"
+            }
+          },
+          {
+            "description": "First date, YYYY-MM-DD",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "First date, YYYY-MM-DD",
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last date, YYYY-MM-DD",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Last date, YYYY-MM-DD",
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+              "enum": [
+                "auto",
+                "rbi",
+                "fbil"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (JSON only)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (JSON only)",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque cursor from meta.next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from meta.next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "json",
+                    "csv"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "currency": "USD",
+                      "date": "2026-09-30",
+                      "published_at": "2026-09-30T12:30:00+05:30",
+                      "rate": "88.3125",
+                      "rate_per_unit": "88.3125",
+                      "source": "fbil",
+                      "unit": 1
+                    }
+                  ],
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              },
+              "text/csv": {
+                "example": "date,currency,rate,unit,rate_per_unit,source,published_at\r\n"
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "FX reference rate history",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/v1/fx/rates/as-of": {
+      "get": {
+        "description": "Returns the rate published on the date, or the latest earlier one with `reason` (weekend, holiday name, not yet published, source gap).",
+        "operationId": "fx_as_of_v1_fx_rates_as_of_get",
+        "parameters": [
+          {
+            "description": "USD, GBP, EUR, JPY, AED or IDR",
+            "in": "query",
+            "name": "currency",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Currency",
+              "description": "USD, GBP, EUR, JPY, AED or IDR"
+            }
+          },
+          {
+            "description": "YYYY-MM-DD",
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "description": "YYYY-MM-DD",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+              "enum": [
+                "auto",
+                "rbi",
+                "fbil"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "currency": "USD",
+                    "effective_date": "2026-01-23",
+                    "lag_days": 3,
+                    "rate": {
+                      "currency": "USD",
+                      "date": "2026-09-30",
+                      "published_at": "2026-09-30T12:30:00+05:30",
+                      "rate": "88.3125",
+                      "rate_per_unit": "88.3125",
+                      "source": "fbil",
+                      "unit": 1
+                    },
+                    "reason": "Republic Day",
+                    "requested_date": "2026-01-26"
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "The rate in force on a date",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/v1/fx/stats": {
+      "get": {
+        "description": "Mean, min, max, first, last, change and volatility (sample stdev of daily log returns, percent) on per-unit rates.",
+        "operationId": "fx_stats_v1_fx_stats_get",
+        "parameters": [
+          {
+            "description": "USD, GBP, EUR, JPY, AED or IDR",
+            "in": "query",
+            "name": "currency",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Currency",
+              "description": "USD, GBP, EUR, JPY, AED or IDR"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "month",
+              "enum": [
+                "week",
+                "month"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "description": "auto: FBIL from 2018-07-10, RBI before; or force rbi / fbil",
+              "enum": [
+                "auto",
+                "rbi",
+                "fbil"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "change_pct": "0.355114",
+                      "count": 21,
+                      "first": "88.0",
+                      "last": "88.3125",
+                      "max": "88.4",
+                      "mean": "88.1000000000",
+                      "min": "87.9",
+                      "period_end": "2026-09-30",
+                      "period_start": "2026-09-01",
+                      "volatility": "0.120000"
+                    }
+                  ],
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Per-week or per-month statistics",
+        "tags": [
+          "fx"
+        ]
+      }
+    },
+    "/v1/holidays": {
+      "get": {
+        "description": "Holidays for one office, or every office when `office` is omitted. `kind` is `ni_act` (Negotiable Instruments Act holiday) or `closing_of_accounts`. A year whose data is not loaded for the requested office is a 409, never an empty list.",
+        "operationId": "list_holidays_v1_holidays_get",
+        "parameters": [
+          {
+            "description": "Calendar year.",
+            "in": "query",
+            "name": "year",
+            "required": true,
+            "schema": {
+              "description": "Calendar year.",
+              "maximum": 2100,
+              "minimum": 2001,
+              "title": "Year",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Office slug; omit for all.",
+            "in": "query",
+            "name": "office",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Office slug; omit for all.",
+              "title": "Office"
+            }
+          },
+          {
+            "description": "Month filter.",
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Month filter.",
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "date": "2026-01-26",
+                      "kind": "ni_act",
+                      "name": "Republic Day",
+                      "office": "mumbai",
+                      "weekday": "Monday"
+                    }
+                  ],
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "holidays",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "rbi",
+                      "source_url": "https://www.rbi.org.in/Scripts/HolidayMatrixDisplay.aspx",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "RBI bank holidays",
+        "tags": [
+          "holidays"
+        ]
+      }
+    },
+    "/v1/invoice/quote": {
+      "post": {
+        "description": "Converts `amount` at the as-of rate for `invoice_date`. When `captured_at` is given, adds an indicative settlement estimate for `office`. `amount` is a string decimal, positive, at most 2 decimal places.",
+        "operationId": "quote_v1_invoice_quote_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "conversion": {
+                      "amount": "1250.50",
+                      "exact": "110434.65625",
+                      "from": "USD",
+                      "is_cross_rate": false,
+                      "rates_used": [],
+                      "result": "110434.65",
+                      "to": "INR"
+                    },
+                    "invoice_date": "2026-09-30",
+                    "notes": [],
+                    "office": "mumbai"
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Quote a cross-border invoice",
+        "tags": [
+          "invoice"
+        ]
+      }
+    },
+    "/v1/offices": {
+      "get": {
+        "operationId": "list_offices_v1_offices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "name": "Mumbai",
+                      "rbi_id": 28,
+                      "slug": "mumbai",
+                      "state": "Maharashtra"
+                    }
+                  ],
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "RBI regional offices",
+        "tags": [
+          "offices"
+        ]
+      }
+    },
+    "/v1/rates/mibor": {
+      "get": {
+        "description": "On Fridays FBIL publishes tenor `3D` (Friday to Monday) instead of `O/N`. With `overnight_only=true` both are returned, each with its real `tenor` and `spans_weekend`. Rates are percent per annum.",
+        "operationId": "mibor_v1_rates_mibor_get",
+        "parameters": [
+          {
+            "description": "First date, YYYY-MM-DD",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "First date, YYYY-MM-DD",
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last date, YYYY-MM-DD",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Last date, YYYY-MM-DD",
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only O/N and 3D rows",
+            "in": "query",
+            "name": "overnight_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Only O/N and 3D rows",
+              "title": "Overnight Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "date": "2026-09-18",
+                      "published_at": "2026-09-18T12:45:00+05:30",
+                      "rate": "5.100000",
+                      "source": "fbil",
+                      "spans_weekend": true,
+                      "tenor": "3D"
+                    }
+                  ],
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "mibor_overnight",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/ovnmibor/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "FBIL overnight MIBOR",
+        "tags": [
+          "mibor"
+        ]
+      }
+    },
+    "/v1/settlement/eta": {
+      "get": {
+        "description": "`working_days` counts N business days after the capture date (the docs' wording). `calendar_then_roll` adds N calendar days and rolls forward to a business day (the docs' worked example). `captured_at` must carry a UTC offset; send `+` as `%2B`.",
+        "operationId": "settlement_eta_v1_settlement_eta_get",
+        "parameters": [
+          {
+            "description": "ISO 8601 with offset",
+            "in": "query",
+            "name": "captured_at",
+            "required": true,
+            "schema": {
+              "description": "ISO 8601 with offset",
+              "format": "date-time",
+              "title": "Captured At",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Office slug, e.g. mumbai",
+            "in": "query",
+            "name": "office",
+            "required": true,
+            "schema": {
+              "description": "Office slug, e.g. mumbai",
+              "title": "Office",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cycle_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 30,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cycle Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SettlementMode",
+              "default": "working_days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "capture_date": "2026-03-27",
+                    "captured_at": "2026-03-27T11:00:00+05:30",
+                    "counted_days": [
+                      "2026-03-30",
+                      "2026-04-01"
+                    ],
+                    "cycle_days": 2,
+                    "disclaimer": "Indicative estimate based on RBI holidays and Razorpay's published T+N rule; not Razorpay's settlement engine",
+                    "eta_date": "2026-04-01",
+                    "mode": "working_days",
+                    "office": "mumbai",
+                    "skipped": [
+                      {
+                        "date": "2026-03-28",
+                        "reason": "4th Saturday"
+                      },
+                      {
+                        "date": "2026-03-29",
+                        "reason": "Sunday"
+                      },
+                      {
+                        "date": "2026-03-31",
+                        "reason": "Banks' closing of accounts"
+                      }
+                    ]
+                  },
+                  "meta": {
+                    "count": 1,
+                    "degraded": false,
+                    "warnings": []
+                  },
+                  "provenance": [
+                    {
+                      "dataset": "fx_reference_rates",
+                      "fetched_at": "2026-10-02T05:13:18.119836+00:00",
+                      "source": "fbil",
+                      "source_url": "https://www.fbil.org.in/wasdm/refrates/fetchfiltered",
+                      "stale": false
+                    }
+                  ]
+                },
+                "schema": {}
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Indicative settlement date for a captured payment",
+        "tags": [
+          "settlement"
+        ]
+      }
+    },
+    "/v1/sources/health": {
+      "get": {
+        "operationId": "sources_health_v1_sources_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "Source health: status, drift and freshness",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/v1/webhooks": {
+      "get": {
+        "operationId": "list_webhooks_v1_webhooks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid admin token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Admin endpoints are disabled (no token set)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List active subscriptions (no secrets)",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "operationId": "create_webhook_v1_webhooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid admin token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Admin endpoints are disabled (no token set)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a subscription (secret shown once)",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/{subscription_id}": {
+      "delete": {
+        "operationId": "delete_webhook_v1_webhooks__subscription_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subscription_id",
+            "required": true,
+            "schema": {
+              "title": "Subscription Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid admin token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Admin endpoints are disabled (no token set)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stop a subscription",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/{subscription_id}/deliveries": {
+      "get": {
+        "operationId": "list_deliveries_v1_webhooks__subscription_id__deliveries_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subscription_id",
+            "required": true,
+            "schema": {
+              "title": "Subscription Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid admin token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Admin endpoints are disabled (no token set)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delivery log, newest first",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Service links and liveness.",
+      "name": "meta"
+    },
+    {
+      "description": "The RBI regional offices.",
+      "name": "offices"
+    },
+    {
+      "description": "RBI bank holidays per regional office.",
+      "name": "holidays"
+    },
+    {
+      "description": "Business-day engine and ICS feeds.",
+      "name": "calendar"
+    },
+    {
+      "description": "Indicative settlement ETA.",
+      "name": "settlement"
+    },
+    {
+      "description": "FX reference rates: history, as-of, convert, stats, compare.",
+      "name": "fx"
+    },
+    {
+      "description": "Cross-border invoice quote.",
+      "name": "invoice"
+    },
+    {
+      "description": "FBIL overnight MIBOR.",
+      "name": "mibor"
+    },
+    {
+      "description": "Upstream health: status, drift and freshness.",
+      "name": "sources"
+    },
+    {
+      "description": "Signed event subscriptions (admin token).",
+      "name": "webhooks"
+    },
+    {
+      "description": "Refresh and dispatch actions (admin token).",
+      "name": "admin"
+    }
+  ]
+}
