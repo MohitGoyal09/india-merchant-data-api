@@ -373,3 +373,9 @@ def test_two_connections_never_claim_the_same_pair(tmp_path: Path) -> None:
 )
 def test_error_class_is_coarse(error: str | None, status: int | None, expected: str | None) -> None:
     assert error_class(error, status) == expected
+
+
+def test_year_available_event_can_be_subscribed() -> None:
+    from imda.store.webhooks_repo import ALLOWED_EVENTS
+
+    assert "holidays.year_available" in ALLOWED_EVENTS

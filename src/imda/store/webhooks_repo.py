@@ -23,6 +23,7 @@ from imda.events.ssrf import redact_url
 ALLOWED_EVENTS = (
     "fx.rates.published",
     "holidays.updated",
+    "holidays.year_available",
     "source.degraded",
     "source.recovered",
 )
