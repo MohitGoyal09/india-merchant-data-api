@@ -481,3 +481,25 @@ def test_adapter_identity() -> None:
     adapter = RbiHolidayAdapter()
 
     assert (adapter.source, adapter.dataset) == (Source.RBI, Dataset.HOLIDAYS)
+
+
+# --- "There are no holidays in <Month> <Year>" (found during the 2000-2025 backfill) ---------
+
+
+def test_empty_month_notice_parses_to_no_holidays():
+    raw = load_payload("holidays_all_2005_06_empty")
+    assert RbiHolidayAdapter().parse(raw) == []
+
+
+def test_empty_month_fingerprint_reports_layout():
+    raw = load_payload("holidays_all_2005_06_empty")
+    assert RbiHolidayAdapter().fingerprint(raw)["layout"] == "no_holidays"
+
+
+def test_empty_notice_for_another_month_is_a_parse_error():
+    html = load_html("holidays_all_2005_06_empty").replace(
+        "no holidays in June 2005", "no holidays in July 2005"
+    )
+    raw = load_payload("holidays_all_2005_06_empty", body=html.encode())
+    with pytest.raises(ParseError, match="does not match the request"):
+        RbiHolidayAdapter().parse(raw)

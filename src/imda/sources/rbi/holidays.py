@@ -31,12 +31,14 @@ from imda.sources.rbi.offices import ALL_OFFICES_VALUE, OFFICE_SELECT, slugify
 HOLIDAYS_URL = "https://www.rbi.org.in/Scripts/HolidayMatrixDisplay.aspx"
 LAYOUT_MATRIX = "month_matrix"
 LAYOUT_LIST = "office_list"
+LAYOUT_EMPTY = "no_holidays"
 NI_ACT_GLYPH = "•"
 CLOSING_GLYPH = "■"
 YEAR_SELECT = "drYear"
 _MONTHS = {name: number for number, name in enumerate(calendar.month_name) if name}
 _MATRIX_HEADER = re.compile(r"^([A-Za-z]+) (\d{4})$")
 _DESCRIPTION_HEADER = ["Holiday Description", "Day"]
+_NO_HOLIDAYS = re.compile(r"There are no holidays in (?:([A-Za-z]+) )?(\d{4})")
 
 
 def _fail(reason: str) -> ParseError:
@@ -200,6 +202,25 @@ def _has_office_list_title(tree: HTMLParser) -> bool:
     return title is not None and "holiday list for the year" in clean_text(title).lower()
 
 
+def _no_holidays_period(tree: HTMLParser) -> tuple[int | None, int] | None:
+    """(month or None, year) when RBI says "There are no holidays in <Month> <Year>"."""
+    body = tree.body
+    match = _NO_HOLIDAYS.search(clean_text(body)) if body is not None else None
+    if match is None:
+        return None
+    month = _month_number(match.group(1)) if match.group(1) else None
+    return month, int(match.group(2))
+
+
+def _check_empty_matches_request(
+    period: tuple[int | None, int], form: Mapping[str, str] | None
+) -> None:
+    month, year = period
+    requested_month = _form_int(form, "drMonth") or None
+    if (month, year) != (requested_month, _form_int(form, "drYear")):
+        raise _fail(f"'no holidays' notice for {month}/{year} does not match the request")
+
+
 def _check_complete(html: str) -> None:
     if "</html>" not in html.lower():
         raise _fail("document is truncated (no closing </html>)")
@@ -231,6 +252,10 @@ class RbiHolidayAdapter:
             return _parse_matrix(tree, matrix)
         if tree.css_first("span.dop_header") is not None or _has_office_list_title(tree):
             return _parse_office_list(tree, raw.request.form, slugs)
+        empty = _no_holidays_period(tree)
+        if empty is not None:
+            _check_empty_matches_request(empty, raw.request.form)
+            return []
         raise _fail("no holiday matrix or office list found")
 
     def fingerprint(self, raw: RawPayload) -> dict[str, object]:
@@ -241,6 +266,8 @@ class RbiHolidayAdapter:
             layout, shape = LAYOUT_MATRIX, ["th:month-year", "th:day*", "td:office", "td:marker*"]
         elif tree.css_first("span.dop_header") is not None or _has_office_list_title(tree):
             layout, shape = LAYOUT_LIST, ["th:month", "td:day", "td:name", "td:marker"]
+        elif _no_holidays_period(tree) is not None:
+            layout, shape = LAYOUT_EMPTY, ["p:no-holidays-notice"]
         else:
             raise _fail("no holiday matrix or office list found")
         return {
