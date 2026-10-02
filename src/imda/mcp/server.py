@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 import ipaddress
+import logging
+import re
+import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -16,11 +19,15 @@ from starlette.applications import Starlette
 from imda import __version__
 from imda.config import Settings
 from imda.mcp.auth import BearerAuthMiddleware
-from imda.mcp.context import ToolEnv, resolve_now
+from imda.mcp.context import ToolEnv, audit_result, resolve_now
 from imda.mcp.errors import result_from_exception, result_from_tool_error
 from imda.mcp.prompts import register_prompts
 from imda.mcp.tools import ALL_TOOLSETS, REGISTRARS
+from imda.observability import configure_audit_logger, emit_audit, safe_arg_keys
 
+logger = logging.getLogger("imda.mcp")
+REQUEST_ID_HEADER = "X-Request-ID"
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 SERVER_NAME = "india-merchant-data"
 HTTP_PATH = "/mcp"
 INSTRUCTIONS = (
@@ -43,17 +50,72 @@ INSTRUCTIONS = (
 
 
 class ImdaServer(MCPServer[Any]):
-    """MCPServer whose tool calls never fail at the protocol level: errors are tool results."""
+    """MCPServer whose tool calls never fail at the protocol level: errors are tool results.
+
+    Every call, including validation failures and unknown tools, writes one audit line.
+    """
+
+    toolset_of: dict[str, str]
+    transport: str = "in-memory"
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any], context: Any = None
     ) -> CallToolResult | InputRequiredResult:
+        started = time.perf_counter()
         try:
-            return await super().call_tool(name, arguments, context)
+            result = await super().call_tool(name, arguments, context)
         except ToolError as exc:
-            return result_from_tool_error(exc)
+            result = result_from_tool_error(exc)
         except Exception as exc:
-            return result_from_exception(exc)
+            result = result_from_exception(exc)
+        self._audit(name, arguments, context, result, time.perf_counter() - started)
+        return result
+
+    def _audit(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Any,
+        result: CallToolResult | InputRequiredResult,
+        elapsed: float,
+    ) -> None:
+        try:  # an audit failure must never fail the call
+            summary = audit_result(result)
+            emit_audit(
+                tool=name,
+                toolset=getattr(self, "toolset_of", {}).get(name),
+                outcome=summary.outcome,
+                duration_ms=elapsed * 1000,
+                result_bytes=summary.result_bytes,
+                truncated=summary.truncated,
+                arg_keys=safe_arg_keys(arguments),
+                request_id=_request_id(context),
+                transport=self.transport,
+            )
+        except Exception:
+            logger.exception("could not write the MCP audit line")
+
+    def run(self, transport: Any = "stdio", **kwargs: Any) -> None:
+        self.transport = {"streamable-http": "http"}.get(transport, transport)
+        super().run(transport, **kwargs)
+
+
+def _request_id(context: Any) -> str | None:
+    """``X-Request-ID`` when an HTTP request carries a valid one, else the JSON-RPC id."""
+    if context is None:
+        return None
+    try:
+        headers = context.headers
+        header = headers.get(REQUEST_ID_HEADER) if headers is not None else None
+        if isinstance(header, str) and _REQUEST_ID.fullmatch(header):
+            return header
+        return str(context.request_id)
+    except Exception:
+        return None
+
+
+def _registered_tools(server: MCPServer) -> set[str]:
+    return {tool.name for tool in server._tool_manager.list_tools()}
 
 
 def _parse_toolsets(toolsets: frozenset[str] | None) -> frozenset[str]:
@@ -81,9 +143,13 @@ def build_server(
     """
     chosen = _parse_toolsets(toolsets)
     env = ToolEnv(settings=settings, now=resolve_now(now))
+    configure_audit_logger()
     server = ImdaServer(SERVER_NAME, instructions=INSTRUCTIONS, version=__version__)
+    server.toolset_of = {}
     for name in sorted(chosen):
+        before = _registered_tools(server)
         REGISTRARS[name](server, env)
+        server.toolset_of |= dict.fromkeys(_registered_tools(server) - before, name)
     register_prompts(server, chosen)
     return server
 
@@ -138,6 +204,8 @@ def build_http_app(
 
     ``transport_security`` defaults to the SDK's loopback-only Host/Origin check.
     """
+    if isinstance(server, ImdaServer):
+        server.transport = "http"
     app = server.streamable_http_app(
         streamable_http_path=HTTP_PATH, host=host, transport_security=transport_security
     )

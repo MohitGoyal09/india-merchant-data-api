@@ -1,10 +1,12 @@
-"""Service root and liveness probe. Neither touches the database."""
+"""Service root, liveness (no database) and readiness (cheap read-only checks)."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from imda import __version__
+from imda.observability import readiness
 
 router = APIRouter(tags=["meta"])
 
@@ -36,3 +38,14 @@ def index(request: Request) -> dict[str, object]:
 @router.get("/healthz", summary="Liveness (no database access)")
 def healthz() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@router.get(
+    "/readyz",
+    summary="Readiness (read-only database checks)",
+    responses={503: {"description": "Not ready: see `checks` for the reason"}},
+)
+def readyz(request: Request) -> JSONResponse:
+    """200 when the database is migrated, FX and holidays are loaded and no source is broken."""
+    result = readiness(request.app.state.settings.db_path)
+    return JSONResponse(result.body, status_code=200 if result.ready else 503)

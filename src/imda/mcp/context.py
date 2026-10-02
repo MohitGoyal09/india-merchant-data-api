@@ -11,14 +11,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from mcp_types import CallToolResult, TextContent
+from mcp_types import CallToolResult, InputRequiredResult, TextContent
 
 from imda.api.deps import RequestContext, SnapshotCache
 from imda.api.envelope import Used, assess
 from imda.api.serialize import to_jsonable
 from imda.config import Settings
 from imda.domain.fx_service import FxService
-from imda.mcp.errors import office_not_found, result_from_exception
+from imda.mcp.errors import INTERNAL_ERROR, office_not_found, result_from_exception
 from imda.mcp.params import normalise_office
 from imda.mcp.sanitize import clean_strings, clean_text
 from imda.mcp.schemas import ToolResult
@@ -35,6 +35,8 @@ MAX_CONCURRENT_CALLS = 8
 """Tool calls that run at once, server-wide. More wait their turn; none fail."""
 SUMMARY_CHARS = 1500
 _BOILERPLATE_KEYS = frozenset({"provenance", "warnings"})
+TRUNCATED_PREFIX = "Result too large"
+"""Starts the warning that ``fit_structured`` adds when it cuts a list; the audit log keys on it."""
 _TOO_LARGE_NOTE = (
     "The full data was left out of this text because it is too large; "
     "read it from structuredContent, or narrow the request."
@@ -156,7 +158,7 @@ def fit_structured(structured: dict[str, Any], limit: int) -> dict[str, Any]:
         kept = len(work[key]) // 2
         work[key] = work[key][:kept]
         notes[key] = (
-            f"Result too large: `{key}` shows the first {kept} of {original[key]} items. "
+            f"{TRUNCATED_PREFIX}: `{key}` shows the first {kept} of {original[key]} items. "
             "Narrow the request to see the rest."
         )
         work["warnings"] = [*structured["warnings"], *notes.values()]
@@ -191,6 +193,39 @@ def _run_tool(env: ToolEnv, result_type: type[ToolResult], handler: Handler) -> 
     return CallToolResult(
         content=[TextContent(type="text", text=text)], structured_content=structured
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ResultAudit:
+    """What the audit log records about a result: never its content."""
+
+    outcome: str
+    result_bytes: int
+    truncated: bool
+
+
+def _error_outcome(result: CallToolResult) -> str:
+    """The error code of an ``isError`` result, or ``internal_error`` for an unhandled one."""
+    first = result.content[0] if result.content else None
+    try:
+        code = json.loads(first.text)["code"] if isinstance(first, TextContent) else None
+    except (ValueError, KeyError, TypeError):
+        code = None
+    if code == INTERNAL_ERROR or not isinstance(code, str):
+        return "internal_error"
+    return code
+
+
+def audit_result(result: CallToolResult | InputRequiredResult) -> ResultAudit:
+    """Outcome (``ok``, the tool's error code, or ``internal_error``), wire size, truncation."""
+    if not isinstance(result, CallToolResult):
+        return ResultAudit("ok", len(result.model_dump_json().encode("utf-8")), False)
+    size = len(result.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8"))
+    warnings = (result.structured_content or {}).get("warnings") or []
+    text_cut = any(isinstance(c, TextContent) and _TOO_LARGE_NOTE in c.text for c in result.content)
+    truncated = text_cut or any(str(w).startswith(TRUNCATED_PREFIX) for w in warnings)
+    outcome = _error_outcome(result) if result.is_error else "ok"
+    return ResultAudit(outcome, size, truncated)
 
 
 def resource_text(result: CallToolResult) -> str:
