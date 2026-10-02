@@ -1,0 +1,16 @@
+{
+  "form": {
+    "btnSubmit": " GO ",
+    "chkAED": "on",
+    "chkAll": "on",
+    "chkEURO": "on",
+    "chkGBP": "on",
+    "chkIDR": "on",
+    "chkUSD": "on",
+    "chkYEN": "on",
+    "txtFromDate": "01/07/2018",
+    "txtToDate": "31/07/2018"
+  },
+  "method": "POST",
+  "url": "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx"
+}

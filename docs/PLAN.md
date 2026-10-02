@@ -23,7 +23,7 @@ This project reverse-engineers both into one typed, time-based, versioned API. P
 
 - G1. Reverse-engineer 2 sites that use opposite web styles, behind one shared adapter framework.
 - G2. Build an FX time-series dataset from 2000 to today. Backfill it once, refresh it daily, and record the source of every row.
-- G3. Provide a bank-holiday calendar for 35 RBI regional offices, a business-day engine, and settlement ETA.
+- G3. Provide a bank-holiday calendar for 34 RBI regional offices, a business-day engine, and settlement ETA.
 - G4. Provide a cross-border invoice helper: an amount, a currency and a date give the INR value plus the settlement date.
 - G5. Production behaviour:
   - provenance on every response
@@ -129,7 +129,7 @@ Every error response uses this shape: `{"error": {"code": "INVALID_DATE", "messa
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /v1/offices` | The 35 RBI regional offices: slug, name, state, RBI id |
+| `GET /v1/offices` | The 34 RBI regional offices: slug, name, state, RBI id |
 | `GET /v1/holidays?office=&year=&month=` | Holidays: date, name, type (NI Act or closing of accounts) |
 | `GET /v1/calendar/business-day?date=&office=` | Is it a working day? If not, why (Sunday, 2nd Saturday, the holiday name) |
 | `GET /v1/calendar/next-business-days?date=&office=&n=` | The next N working days |
