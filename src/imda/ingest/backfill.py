@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 
+from imda.health.drift import Baselines
 from imda.ingest.common import ExchangeLog, RunEnv, RunSummary, Task, TaskOutput, run_plan
 from imda.ingest.loaders import (
     FBIL_FX_START,
@@ -37,6 +38,7 @@ def backfill(
     force: bool = False,
     today: dt.date,
     exchange_log: ExchangeLog | None = None,
+    baselines: Baselines | None = None,
 ) -> RunSummary:
     """Load ``datasets`` for ``[start, end]`` (``end`` is capped at ``today``).
 
@@ -49,7 +51,9 @@ def backfill(
     if start > end:
         raise ValueError(f"start {start} is after end {end}")
     plan = _plan(start, end, datasets, force)
-    return run_plan(store, client, "backfill", plan, today=today, exchange_log=exchange_log)
+    return run_plan(
+        store, client, "backfill", plan, today=today, exchange_log=exchange_log, baselines=baselines
+    )
 
 
 def _plan(start: dt.date, end: dt.date, datasets: set[Dataset], force: bool) -> list[Task]:

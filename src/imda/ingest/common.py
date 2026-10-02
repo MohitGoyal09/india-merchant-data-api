@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
+from imda.health.drift import Baselines, DriftReport, check_drift, default_baselines
 from imda.http.client import ExchangeEvent
 from imda.models import Dataset, Source, SourceStatus
 from imda.sources.base import HttpClient, ParseError, RawPayload, UpstreamError, UpstreamRequest
@@ -90,6 +91,9 @@ class TaskResult:
     rows: int = 0
     requests: int = 0
     error: str | None = None
+    health: SourceStatus | None = None
+    """Health recorded for the source (``degraded`` when parsing worked but the shape drifted)."""
+    drift: DriftReport | None = None
 
     @property
     def key(self) -> str:
@@ -106,16 +110,20 @@ class RunSummary:
     def as_dict(self) -> dict[str, object]:
         return {
             "requests": self.requests,
-            "tasks": {
-                t.key: {
-                    "status": t.status,
-                    "rows": t.rows,
-                    "requests": t.requests,
-                    "error": t.error,
-                }
-                for t in self.tasks
-            },
+            "tasks": {t.key: _task_dict(t) for t in self.tasks},
         }
+
+
+def _task_dict(task: TaskResult) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "status": task.status,
+        "rows": task.rows,
+        "requests": task.requests,
+        "error": task.error,
+    }
+    if task.drift is not None and task.drift.drifted:
+        entry["drift"] = task.drift.as_dict()
+    return entry
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +134,7 @@ class RunEnv:
     run_id: str
     today: dt.date
     page: HolidayPage
+    baselines: Baselines
 
 
 Task = tuple[Source, Dataset, Callable[[RunEnv], TaskOutput]]
@@ -139,12 +148,23 @@ def run_plan(
     *,
     today: dt.date,
     exchange_log: ExchangeLog | None = None,
+    baselines: Baselines | None = None,
 ) -> RunSummary:
-    """Run each task in isolation inside one ``ingest_runs`` row."""
+    """Run each task in isolation inside one ``ingest_runs`` row.
+
+    ``baselines`` default to the packaged ones; a fingerprint that drifts from its baseline
+    marks the source ``degraded`` (the data just parsed is still kept).
+    """
     log = exchange_log if exchange_log is not None else ExchangeLog(store)
     run_id = store.start_run(kind)
     env = RunEnv(
-        store=store, client=client, log=log, run_id=run_id, today=today, page=HolidayPage(client)
+        store=store,
+        client=client,
+        log=log,
+        run_id=run_id,
+        today=today,
+        page=HolidayPage(client),
+        baselines=default_baselines() if baselines is None else baselines,
     )
     start_attempts = log.attempts
     try:
@@ -185,11 +205,29 @@ def execute_task(
     requests = env.log.attempts - before
     if output.skipped:
         return TaskResult(source, dataset, "skipped", requests=requests)
+    drift = _check_drift(env, source, dataset, output.fingerprint)
+    status = SourceStatus.DEGRADED if drift is not None and drift.drifted else SourceStatus.OK
+    error = drift.summary() if status is SourceStatus.DEGRADED and drift is not None else None
     previous = env.store.set_source_health(
-        source, dataset, SourceStatus.OK, fingerprint=output.fingerprint
+        source,
+        dataset,
+        status,
+        error=error,
+        fingerprint=output.fingerprint,
+        drift=None if drift is None else drift.as_dict(),
     )
-    _record_transition(env.store, source, dataset, previous, SourceStatus.OK, None)
-    return TaskResult(source, dataset, "ok", rows=output.rows, requests=requests)
+    _record_transition(env.store, source, dataset, previous, status, error)
+    return TaskResult(
+        source, dataset, "ok", rows=output.rows, requests=requests, health=status, drift=drift
+    )
+
+
+def _check_drift(
+    env: RunEnv, source: Source, dataset: Dataset, fingerprint: dict[str, object] | None
+) -> DriftReport | None:
+    if fingerprint is None:
+        return None
+    return check_drift(env.baselines, source, dataset, fingerprint)
 
 
 def _describe(exc: Exception) -> str:
@@ -206,7 +244,14 @@ def _failed(
 ) -> TaskResult:
     previous = env.store.set_source_health(source, dataset, status, error=error)
     _record_transition(env.store, source, dataset, previous, status, error)
-    return TaskResult(source, dataset, "failed", requests=env.log.attempts - before, error=error)
+    return TaskResult(
+        source,
+        dataset,
+        "failed",
+        requests=env.log.attempts - before,
+        error=error,
+        health=status,
+    )
 
 
 def _record_transition(

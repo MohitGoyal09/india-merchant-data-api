@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from imda.health.drift import Baselines
 from imda.ingest.common import ExchangeLog, RunEnv, RunSummary, Task, TaskOutput, run_plan
 from imda.ingest.loaders import (
     FBIL_FX_START,
@@ -41,6 +42,7 @@ def refresh(
     *,
     today: dt.date,
     exchange_log: ExchangeLog | None = None,
+    baselines: Baselines | None = None,
 ) -> RunSummary:
     """Offices, holidays (this month, next month, this year if missing), FX and MIBOR."""
     plan: list[Task] = [
@@ -50,7 +52,9 @@ def refresh(
         (Source.FBIL, Dataset.FX, _fbil_fx),
         (Source.FBIL, Dataset.MIBOR, _fbil_mibor),
     ]
-    return run_plan(store, client, "refresh", plan, today=today, exchange_log=exchange_log)
+    return run_plan(
+        store, client, "refresh", plan, today=today, exchange_log=exchange_log, baselines=baselines
+    )
 
 
 def _since(latest: dt.date | None, today: dt.date) -> dt.date:

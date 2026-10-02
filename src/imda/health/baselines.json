@@ -1,0 +1,185 @@
+{
+  "fbil/fx_reference_rates": {
+    "_ignore": [
+      "label_pattern_count",
+      "row_count"
+    ],
+    "key_sets": [
+      [
+        "comments",
+        "displayTime",
+        "processRunDate",
+        "rate",
+        "subProdName"
+      ]
+    ],
+    "label_pattern_count": 1,
+    "row_count": 64,
+    "value_types": {
+      "comments": [
+        "str"
+      ],
+      "displayTime": [
+        "str"
+      ],
+      "processRunDate": [
+        "str"
+      ],
+      "rate": [
+        "float"
+      ],
+      "subProdName": [
+        "str"
+      ]
+    }
+  },
+  "fbil/mibor_overnight": {
+    "_ignore": [
+      "label_pattern_count",
+      "row_count"
+    ],
+    "key_sets": [
+      [
+        "displayTime",
+        "processRunDate",
+        "rate",
+        "tenor"
+      ]
+    ],
+    "label_pattern_count": 2,
+    "row_count": 17,
+    "value_types": {
+      "displayTime": [
+        "str"
+      ],
+      "processRunDate": [
+        "str"
+      ],
+      "rate": [
+        "float"
+      ],
+      "tenor": [
+        "str"
+      ]
+    }
+  },
+  "rbi/fx_reference_rates#no_data": {
+    "form_fields": [
+      "UsrFontCntr$btn",
+      "UsrFontCntr$txtSearch",
+      "__EVENTVALIDATION",
+      "__VIEWSTATE",
+      "__VIEWSTATEGENERATOR",
+      "btnSubmit",
+      "chkAED",
+      "chkAll",
+      "chkEURO",
+      "chkGBP",
+      "chkIDR",
+      "chkUSD",
+      "chkYEN",
+      "txtFromDate",
+      "txtToDate"
+    ],
+    "layout": "no_data",
+    "table_header": []
+  },
+  "rbi/fx_reference_rates#rate_table": {
+    "form_fields": [
+      "UsrFontCntr$btn",
+      "UsrFontCntr$txtSearch",
+      "__EVENTVALIDATION",
+      "__VIEWSTATE",
+      "__VIEWSTATEGENERATOR",
+      "btnSubmit",
+      "chkAED",
+      "chkAll",
+      "chkEURO",
+      "chkGBP",
+      "chkIDR",
+      "chkUSD",
+      "chkYEN",
+      "txtFromDate",
+      "txtToDate"
+    ],
+    "layout": "rate_table",
+    "table_header": [
+      "Date",
+      "USD (INR / 1 USD)",
+      "GBP (INR / 1 GBP)",
+      "EUR (INR / 1 EUR)",
+      "JPY (INR / 100 JPY)",
+      "AED (INR / 1 AED)",
+      "IDR (INR / 10000 IDR)"
+    ]
+  },
+  "rbi/holidays#month_matrix": {
+    "form_fields": [
+      "UsrFontCntr$btn",
+      "UsrFontCntr$txtSearch",
+      "__EVENTVALIDATION",
+      "__VIEWSTATE",
+      "__VIEWSTATEGENERATOR",
+      "btnGo",
+      "drMonth",
+      "drRegionalOffice",
+      "drYear"
+    ],
+    "layout": "month_matrix",
+    "select_option_counts": {
+      "drMonth": 13,
+      "drRegionalOffice": 35
+    },
+    "table_shape": [
+      "th:month-year",
+      "th:day*",
+      "td:office",
+      "td:marker*"
+    ]
+  },
+  "rbi/holidays#no_holidays": {
+    "form_fields": [
+      "UsrFontCntr$btn",
+      "UsrFontCntr$txtSearch",
+      "__EVENTVALIDATION",
+      "__VIEWSTATE",
+      "__VIEWSTATEGENERATOR",
+      "btnGo",
+      "drMonth",
+      "drRegionalOffice",
+      "drYear"
+    ],
+    "layout": "no_holidays",
+    "select_option_counts": {
+      "drMonth": 13,
+      "drRegionalOffice": 35
+    },
+    "table_shape": [
+      "p:no-holidays-notice"
+    ]
+  },
+  "rbi/holidays#office_list": {
+    "form_fields": [
+      "UsrFontCntr$btn",
+      "UsrFontCntr$txtSearch",
+      "__EVENTVALIDATION",
+      "__VIEWSTATE",
+      "__VIEWSTATEGENERATOR",
+      "btnGo",
+      "drMonth",
+      "drRegionalOffice",
+      "drYear"
+    ],
+    "layout": "office_list",
+    "select_option_counts": {
+      "drMonth": 13,
+      "drRegionalOffice": 35
+    },
+    "table_shape": [
+      "th:month",
+      "td:day",
+      "td:name",
+      "td:marker"
+    ]
+  }
+}
