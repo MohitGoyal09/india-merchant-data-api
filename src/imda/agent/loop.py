@@ -17,6 +17,7 @@ The client is injected, so tests pass a fake with scripted responses.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -24,7 +25,7 @@ from typing import Any, Protocol, cast
 
 import anthropic
 
-from imda.agent.mcp_backend import ToolBackend, ToolOutcome
+from imda.agent.mcp_backend import ToolBackend, ToolOutcome, same_json
 from imda.agent.prompts import build_system_prompt
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -32,7 +33,9 @@ DEFAULT_EFFORT = "medium"
 DEFAULT_MAX_TURNS = 10
 MAX_TOKENS = 16_000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
-MAX_TOOL_RESULT_CHARS = 20_000
+MAX_TOOL_RESULT_CHARS = 64_000
+"""Above the MCP server's own caps (about 48 KB of text, 48 KB of structured JSON)."""
+TRUNCATED_MARKER = "\n[output truncated]"
 EMPTY_RESULT_TEXT = "(the tool returned no content)"
 
 
@@ -246,12 +249,50 @@ def _api_failure(exc: anthropic.APIError) -> tuple[str, str]:
 
 
 # --------------------------------------------------------------------------- tools
-def _clip(text: str) -> str:
+def _text_cut(text: str) -> str:
+    return text[:MAX_TOOL_RESULT_CHARS] + TRUNCATED_MARKER
+
+
+def _shrunk_json(outcome: ToolOutcome) -> str | None:
+    """The result with trailing rows dropped so it fits, or None when that cannot work.
+
+    Only the largest list field loses rows; every other key (``next_cursor`` included) is kept,
+    and ``truncated_rows`` says how many rows went. The output stays parseable JSON.
+    """
+    data = outcome.structured
+    if not isinstance(data, dict):
+        return None
+    lists = {k: v for k, v in data.items() if isinstance(v, list) and v}
+    if not lists:
+        return None
+    key = max(lists, key=lambda k: len(json.dumps(lists[k], ensure_ascii=False)))
+    rows = lists[key]
+    summary = outcome.text.strip()
+    head = "" if not summary or same_json(summary, data) else f"{summary}\n"
+
+    def render(kept: int) -> str:
+        body = {**data, key: rows[:kept], "truncated_rows": len(rows) - kept}
+        return head + json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+
+    if len(render(0)) > MAX_TOOL_RESULT_CHARS:
+        return None
+    low, high = 0, len(rows)  # the most rows that still fit: render(low) always fits
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(render(middle)) <= MAX_TOOL_RESULT_CHARS:
+            low = middle
+        else:
+            high = middle - 1
+    return render(low)
+
+
+def _clip(outcome: ToolOutcome) -> str:
+    text = outcome.for_model()
     if not text:
         return EMPTY_RESULT_TEXT
     if len(text) <= MAX_TOOL_RESULT_CHARS:
         return text
-    return text[:MAX_TOOL_RESULT_CHARS] + "\n[output truncated]"
+    return _shrunk_json(outcome) or _text_cut(text)
 
 
 async def _execute_tool(backend: ToolBackend, block: Any) -> tuple[ToolCall, dict[str, Any]]:
@@ -268,7 +309,7 @@ async def _execute_tool(backend: ToolBackend, block: Any) -> tuple[ToolCall, dic
         args = {}
         outcome = ToolOutcome("Tool input must be a JSON object.", None, True)
     duration_ms = round((time.perf_counter() - started) * 1000)
-    text = _clip(outcome.for_model())
+    text = _clip(outcome)
     result: dict[str, Any] = {"type": "tool_result", "tool_use_id": block.id, "content": text}
     if outcome.is_error:
         result["is_error"] = True

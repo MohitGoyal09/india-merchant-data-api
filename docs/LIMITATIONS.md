@@ -89,6 +89,25 @@ what that means.
 - **The admin token is a single shared bearer token.** Read endpoints are open and meant for
   localhost. Production would add per-client keys, rate limits on our own API, and TLS
   termination.
+- **The MCP HTTP token is also one shared bearer token.** `imda mcp --transport http` has no
+  per-client identity, no per-client rate limit and no rotation beyond restarting with a new
+  `IMDA_MCP_TOKEN`. It speaks plain HTTP, so a remote deployment needs TLS terminated by a
+  reverse proxy in front of it. A non-loopback `--host` is refused unless each public name is
+  listed with `--allowed-host HOST[:PORT]` (repeatable), which turns on Host and Origin checks
+  against DNS rebinding. Failed logins are logged at WARNING (method, path, client address; never
+  the header). At most 8 tool calls run at once; the rest wait.
+- **The MCP server opens the database with `mode=ro`, but SQLite still writes next to it.** In
+  WAL mode a reader creates and updates the `-wal` and `-shm` files beside the database file. So
+  the directory must be writable by the server user even though the database itself is never
+  modified. A read-only mount for the whole directory can make calls fail with
+  `STORE_UNAVAILABLE`.
+- **Prompt injection in scraped names relies on the model.** Holiday and office names (at most 300
+  characters each) come from scraped pages. The server removes control, zero-width, bidi,
+  tag, private-use and filler characters (after NFKC normalisation) and caps the length, which
+  stops hidden or fake structure. It cannot stop a plain-language sentence such as "ignore your
+  instructions" inside a name. Defence there depends on the model treating tool text as data, as
+  the server instructions and tool descriptions tell it to. Zero-width joiners are removed too,
+  so a few Indic conjunct forms in names lose their joiner.
 - **Webhook secrets are stored in plain text** in SQLite, because they are needed for signing.
   Production would use a KMS-backed secret store.
 

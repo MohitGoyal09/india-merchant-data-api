@@ -212,6 +212,14 @@ def _parse_toolsets(value: str | None) -> frozenset[str] | None:
     return names
 
 
+def _checked_allowed_hosts(values: list[str] | None) -> list[str]:
+    cleaned = [value.strip() for value in values or []]
+    for value in cleaned:
+        if not value or "://" in value or "/" in value or any(ch.isspace() for ch in value):
+            raise typer.BadParameter(f"{value!r} is not HOST[:PORT]", param_hint="--allowed-host")
+    return cleaned
+
+
 @app.command("mcp")
 def mcp_command(
     transport: Annotated[
@@ -220,12 +228,27 @@ def mcp_command(
     host: Annotated[str, typer.Option(help="Bind address (http only).")] = DEFAULT_HOST,
     port: Annotated[int, typer.Option(min=1, max=65535, help="Port (http only).")] = MCP_PORT,
     toolsets: Annotated[str | None, typer.Option(help=MCP_TOOLSETS_HELP)] = None,
+    allowed_host: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allowed-host",
+            help="HOST[:PORT] clients may use in the Host header (http, repeatable). "
+            "Required when --host is not a loopback address.",
+        ),
+    ] = None,
 ) -> None:
     """Run the read-only MCP server (13 tools over the same data as the REST API).
 
     stdio needs no token. http serves /mcp and needs IMDA_MCP_TOKEN (32+ chars) as Bearer.
+    It speaks plain HTTP: bind a non-loopback --host only behind a TLS proxy, and list the
+    public host names with --allowed-host.
     """
-    from imda.mcp.server import build_http_app, build_server
+    from imda.mcp.server import (
+        build_http_app,
+        build_server,
+        is_loopback_host,
+        transport_security_for,
+    )
 
     settings = get_settings()
     chosen = _parse_toolsets(toolsets)
@@ -237,8 +260,26 @@ def mcp_command(
                 err=True,
             )
             raise typer.Exit(code=2)
+        hosts = _checked_allowed_hosts(allowed_host)
+        security = None
+        if not is_loopback_host(host):
+            if not hosts:
+                typer.echo(
+                    f"error: --host {host} is not a loopback address; pass --allowed-host "
+                    "HOST[:PORT] (repeatable) for each name clients will use",
+                    err=True,
+                )
+                raise typer.Exit(code=2)
+            typer.echo(
+                "warning: the MCP HTTP server speaks plain HTTP; terminate TLS at a reverse "
+                "proxy in front of it.",
+                err=True,
+            )
+        if hosts:
+            security = transport_security_for(hosts)
         server = build_server(settings, toolsets=chosen)
-        uvicorn.run(build_http_app(server, secret, host=host), host=host, port=port)
+        http_app = build_http_app(server, secret, host=host, transport_security=security)
+        uvicorn.run(http_app, host=host, port=port)
         return
     build_server(settings, toolsets=chosen).run("stdio")
 

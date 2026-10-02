@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -28,7 +29,12 @@ FIXED_NOW_ENV = "IMDA_MCP_FIXED_NOW"
 """Test and eval only: an ISO 8601 datetime with offset that replaces the real clock."""
 MAX_TEXT_BYTES = 48_000
 """No tool result carries more text than this (about 50 KB)."""
+MAX_STRUCTURED_BYTES = 48_000
+"""No tool result carries more structured content than this (compact JSON bytes)."""
+MAX_CONCURRENT_CALLS = 8
+"""Tool calls that run at once, server-wide. More wait their turn; none fail."""
 SUMMARY_CHARS = 1500
+_BOILERPLATE_KEYS = frozenset({"provenance", "warnings"})
 _TOO_LARGE_NOTE = (
     "The full data was left out of this text because it is too large; "
     "read it from structuredContent, or narrow the request."
@@ -64,9 +70,11 @@ class ToolEnv:
     settings: Settings
     now: Callable[[], dt.datetime]
     snapshots: SnapshotCache = field(init=False)
+    slots: threading.BoundedSemaphore = field(init=False)
 
     def __post_init__(self) -> None:
         self.snapshots = SnapshotCache(self.settings)
+        self.slots = threading.BoundedSemaphore(MAX_CONCURRENT_CALLS)
 
     @contextmanager
     def request(self) -> Iterator[RequestContext]:
@@ -119,12 +127,54 @@ def _render(summary: str, warnings: Sequence[str], structured: dict[str, Any]) -
     return f"{head}\n\n{_TOO_LARGE_NOTE}"
 
 
+def _json_size(structured: Mapping[str, Any]) -> int:
+    return len(json.dumps(structured, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
+def _largest_list(structured: Mapping[str, Any]) -> str | None:
+    """The key of the biggest non-empty top-level data list, or None."""
+    sizes = {
+        key: len(json.dumps(value, separators=(",", ":"), ensure_ascii=False))
+        for key, value in structured.items()
+        if key not in _BOILERPLATE_KEYS and isinstance(value, list) and value
+    }
+    return max(sizes, key=lambda key: sizes[key]) if sizes else None
+
+
+def fit_structured(structured: dict[str, Any], limit: int) -> dict[str, Any]:
+    """``structured`` within ``limit`` bytes: trailing list items dropped, each with a warning.
+
+    The result stays a successful, valid payload. It is never trimmed silently.
+    """
+    work = dict(structured)
+    original = {key: len(value) for key, value in work.items() if isinstance(value, list)}
+    notes: dict[str, str] = {}
+    while _json_size(work) > limit:
+        key = _largest_list(work)
+        if key is None:
+            break
+        kept = len(work[key]) // 2
+        work[key] = work[key][:kept]
+        notes[key] = (
+            f"Result too large: `{key}` shows the first {kept} of {original[key]} items. "
+            "Narrow the request to see the rest."
+        )
+        work["warnings"] = [*structured["warnings"], *notes.values()]
+    return work
+
+
 def run_tool(env: ToolEnv, result_type: type[ToolResult], handler: Handler) -> CallToolResult:
     """Run ``handler`` against a fresh read-only context and wrap the outcome.
 
     Success: a text summary plus the JSON, and ``structuredContent`` matching ``result_type``.
     Any exception becomes an ``isError`` result; nothing is raised to the host.
+    At most ``MAX_CONCURRENT_CALLS`` run at once; the rest wait for a slot.
     """
+    with env.slots:
+        return _run_tool(env, result_type, handler)
+
+
+def _run_tool(env: ToolEnv, result_type: type[ToolResult], handler: Handler) -> CallToolResult:
     try:
         with env.request() as rc:
             draft = handler(rc)
@@ -134,7 +184,8 @@ def run_tool(env: ToolEnv, result_type: type[ToolResult], handler: Handler) -> C
             to_jsonable({**draft.data, "provenance": assessment.provenance, "warnings": warnings})
         )
         structured = result_type.model_validate(body).model_dump(mode="json")
-        text = _render(clean_text(draft.summary, SUMMARY_CHARS), warnings, structured)
+        structured = fit_structured(structured, MAX_STRUCTURED_BYTES)
+        text = _render(clean_text(draft.summary, SUMMARY_CHARS), structured["warnings"], structured)
     except Exception as exc:
         return result_from_exception(exc)
     return CallToolResult(

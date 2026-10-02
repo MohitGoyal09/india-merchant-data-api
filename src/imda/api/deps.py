@@ -26,6 +26,8 @@ CALENDAR_TTL_SECONDS = 60.0
 MIN_API_DATE = dt.date(2000, 1, 1)
 MAX_API_DATE = dt.date(2100, 12, 31)
 
+_DATETIME_BOUNDS_MESSAGE = f"datetime must fall between {MIN_API_DATE} and {MAX_API_DATE} (IST)"
+
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _AMOUNT = re.compile(r"^[+-]?\d{1,18}(\.\d{1,18})?$")
 _SPACE_BEFORE_OFFSET = re.compile(r"(?<=\d) (?=\d{2}:\d{2}$)")
@@ -63,6 +65,12 @@ def _aware_datetime(value: Any) -> dt.datetime:
         raise ValueError("invalid ISO 8601 datetime")
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("datetime must include a UTC offset, e.g. 2026-03-27T11:00:00+05:30")
+    try:
+        ist_day = parsed.astimezone(IST).date()
+    except OverflowError:
+        raise ValueError(_DATETIME_BOUNDS_MESSAGE) from None
+    if not MIN_API_DATE <= ist_day <= MAX_API_DATE:
+        raise ValueError(_DATETIME_BOUNDS_MESSAGE)
     return parsed
 
 

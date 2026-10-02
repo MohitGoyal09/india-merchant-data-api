@@ -332,3 +332,32 @@ async def test_error_results_carry_no_structured_content(
 
     assert result.is_error
     assert result.structured_content is None
+
+
+@pytest.mark.parametrize(
+    "captured_at",
+    [
+        "9999-12-31T23:59:59+00:00",
+        "0001-01-01T00:00:00+05:30",
+        "2101-01-01T00:00:00+05:30",
+        "1999-12-31T23:59:59+05:30",
+    ],
+)
+async def test_out_of_range_captured_at_is_invalid_request(
+    client: Client, captured_at: str
+) -> None:
+    settlement = await fail(
+        client, "estimate_settlement_date", captured_at=captured_at, **MUMBAI_OFFICE
+    )
+    quote = await fail(
+        client,
+        "quote_invoice",
+        amount="10.00",
+        currency="USD",
+        invoice_date="2026-09-24",
+        captured_at=captured_at,
+        **MUMBAI_OFFICE,
+    )
+
+    assert settlement["code"] == quote["code"] == "INVALID_REQUEST"
+    assert "captured_at" in settlement["message"]

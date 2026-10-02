@@ -225,8 +225,12 @@ class MiborResult(ToolResult):
 # ----------------------------------------------------------------------------- health
 class DriftItem(_Model):
     drifted: bool
-    added_keys: list[str]
-    removed_keys: list[str]
+    added_keys: list[str] = Field(description="At most 20 keys; see `added_count` for the total.")
+    removed_keys: list[str] = Field(
+        description="At most 20 keys; see `removed_count` for the total."
+    )
+    added_count: int = Field(description="How many keys were added (may exceed the list).")
+    removed_count: int = Field(description="How many keys were removed (may exceed the list).")
     changed_keys: list[str]
     note: str | None
     summary: str

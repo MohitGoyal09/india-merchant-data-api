@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 BEARER_PREFIX = "bearer "
+MIN_TOKEN_LENGTH = 32
+logger = logging.getLogger("imda.mcp")
 
 
 def _digest(value: str) -> bytes:
@@ -33,8 +36,8 @@ class BearerAuthMiddleware:
     """Reject HTTP requests without the right bearer token with 401. Other scopes pass through."""
 
     def __init__(self, app: ASGIApp, token: str) -> None:
-        if not token:
-            raise ValueError("a bearer token is required")
+        if len(token) < MIN_TOKEN_LENGTH:
+            raise ValueError(f"the bearer token must be at least {MIN_TOKEN_LENGTH} characters")
         self.app = app
         self._token = token
 
@@ -45,6 +48,13 @@ class BearerAuthMiddleware:
         if token_matches(Headers(scope=scope).get("authorization"), self._token):
             await self.app(scope, receive, send)
             return
+        client = scope.get("client")
+        logger.warning(
+            "MCP auth rejected: 401 %s %s from %s",
+            scope.get("method", "?"),
+            scope.get("path", "?"),
+            client[0] if client else "unknown",
+        )
         response = JSONResponse(
             {
                 "error": {

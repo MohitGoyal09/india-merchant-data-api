@@ -3,29 +3,47 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 MAX_TEXT_CHARS = 300
 ELLIPSIS = "..."
-# Code point ranges: C0, DEL and C1 controls (newline, tab and ESC included), zero-width and
-# bidi marks, the line and paragraph separators, and the byte-order mark.
-_STRIPPED_RANGES = (
-    (0x00, 0x1F),
-    (0x7F, 0x9F),
-    (0x200B, 0x200F),
-    (0x2028, 0x202E),
-    (0x2060, 0x2064),
-    (0x2066, 0x2069),
-    (0xFEFF, 0xFEFF),
+# General categories dropped outright: controls, format characters (zero-width, bidi, soft
+# hyphen, tag characters), private use, unassigned, and the line and paragraph separators.
+_DROPPED_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cn", "Zl", "Zp"})
+# Characters that render as blank or join text invisibly but are not in those categories:
+# braille blank, Hangul fillers, Mongolian vowel separator, combining grapheme joiner, plus
+# the variation selectors (emoji VS16 and friends), which can hide data inside a glyph.
+_DROPPED_CHARS = frozenset("⠀ㅤᅟᅠﾠ᠎͏")
+_DROPPED_RANGES = (
+    (0x180B, 0x180F),
+    (0xFE00, 0xFE0F),
+    (0xE0100, 0xE01EF),
 )
-_CONTROLS = re.compile(
-    "[" + "".join(f"{re.escape(chr(a))}-{re.escape(chr(b))}" for a, b in _STRIPPED_RANGES) + "]"
-)
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _is_dropped(char: str) -> bool:
+    if char in _DROPPED_CHARS:
+        return True
+    code = ord(char)
+    if any(low <= code <= high for low, high in _DROPPED_RANGES):
+        return True
+    return unicodedata.category(char) in _DROPPED_CATEGORIES
 
 
 def clean_text(value: str, limit: int = MAX_TEXT_CHARS) -> str:
-    """Replace control and invisible characters with spaces, collapse blanks, cap the length."""
-    collapsed = " ".join(_CONTROLS.sub(" ", value).split())
+    """NFKC-normalise, drop invisible and control characters, collapse blanks, cap the length.
+
+    Tab, newline and the other whitespace controls become a space first, so words they
+    separated stay separate; every other dropped character is removed without a trace.
+    """
+    kept = [
+        " " if char.isspace() else char
+        for char in unicodedata.normalize("NFKC", value)
+        if char.isspace() or not _is_dropped(char)
+    ]
+    collapsed = _WHITESPACE.sub(" ", "".join(kept)).strip()
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - len(ELLIPSIS)] + ELLIPSIS

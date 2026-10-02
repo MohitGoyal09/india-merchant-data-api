@@ -175,3 +175,52 @@ async def test_non_http_scopes_pass_through_the_guard() -> None:
     await guard({"type": "lifespan"}, None, None)  # type: ignore[arg-type]
 
     assert seen == ["lifespan"]
+
+
+def test_middleware_refuses_a_short_token() -> None:
+    async def inner(scope: Any, receive: Any, send: Any) -> None:  # pragma: no cover
+        raise AssertionError
+
+    with pytest.raises(ValueError, match="32"):
+        BearerAuthMiddleware(inner, "t" * 31)
+    BearerAuthMiddleware(inner, "t" * 32)
+
+
+async def test_each_401_is_logged_without_the_header(
+    app: Starlette, caplog: pytest.LogCaptureFixture
+) -> None:
+    secret_guess = "guess-" + "g" * 40
+    with caplog.at_level("WARNING", logger="imda.mcp"):
+        async with raw_client(app) as client:
+            await client.post(
+                "/mcp",
+                json=INITIALIZE,
+                headers={**MCP_HEADERS, "Authorization": f"Bearer {secret_guess}"},
+            )
+            await client.post("/mcp", json=INITIALIZE, headers=MCP_HEADERS)
+
+    records = [r for r in caplog.records if r.levelname == "WARNING" and r.name == "imda.mcp"]
+    assert len(records) == 2
+    for record in records:
+        message = record.getMessage()
+        assert "POST" in message
+        assert "/mcp" in message
+        assert "401" in message
+    everything = caplog.text
+    assert secret_guess not in everything
+    assert TOKEN not in everything
+    assert "Bearer" not in everything
+
+
+async def test_a_good_token_is_not_logged_as_a_failure(
+    app: Starlette, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="imda.mcp"):
+        async with raw_client(app) as client:
+            await client.post(
+                "/mcp",
+                json=INITIALIZE,
+                headers={**MCP_HEADERS, "Authorization": f"Bearer {TOKEN}"},
+            )
+
+    assert [r for r in caplog.records if r.name == "imda.mcp"] == []

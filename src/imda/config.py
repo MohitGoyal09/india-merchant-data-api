@@ -57,22 +57,26 @@ class Settings(BaseSettings):
     @field_validator("admin_token")
     @classmethod
     def _admin_token_strength(cls, value: SecretStr | None) -> SecretStr | None:
-        """Unset or empty disables admin routes; a set token must be at least 32 characters."""
-        if value is None or not value.get_secret_value().strip():
-            return None
-        if len(value.get_secret_value()) < MIN_ADMIN_TOKEN_LENGTH:
-            raise ValueError(f"admin_token must be at least {MIN_ADMIN_TOKEN_LENGTH} characters")
-        return value
+        """Unset or blank disables admin routes; a set token needs 32+ characters once trimmed."""
+        return _checked_token("admin_token", value)
 
     @field_validator("mcp_token")
     @classmethod
     def _mcp_token_strength(cls, value: SecretStr | None) -> SecretStr | None:
-        """Unset or empty disables the MCP HTTP transport; a set token needs 32+ characters."""
-        if value is None or not value.get_secret_value().strip():
-            return None
-        if len(value.get_secret_value()) < MIN_ADMIN_TOKEN_LENGTH:
-            raise ValueError(f"mcp_token must be at least {MIN_ADMIN_TOKEN_LENGTH} characters")
-        return value
+        """Unset or blank disables the MCP HTTP transport; a set token needs 32+ characters."""
+        return _checked_token("mcp_token", value)
+
+
+def _checked_token(name: str, value: SecretStr | None) -> SecretStr | None:
+    """Surrounding whitespace (a stray newline from a secret file) is not part of the token."""
+    if value is None:
+        return None
+    token = value.get_secret_value().strip()
+    if not token:
+        return None
+    if len(token) < MIN_ADMIN_TOKEN_LENGTH:
+        raise ValueError(f"{name} must be at least {MIN_ADMIN_TOKEN_LENGTH} characters")
+    return SecretStr(token)
 
 
 @lru_cache(maxsize=1)

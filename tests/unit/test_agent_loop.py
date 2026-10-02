@@ -674,3 +674,98 @@ def test_demo_exits_1_when_the_run_does_not_finish(demo: ModuleType) -> None:
     )
 
     assert code == 1
+
+
+# --------------------------------------------------------------------------- JSON-aware clipping
+def _fx_page(target_bytes: int) -> dict[str, Any]:
+    row = {
+        "date": "2026-09-01",
+        "currency": "USD",
+        "rate": "88.1234",
+        "unit": 1,
+        "rate_per_unit": "88.1234",
+        "source": "fbil",
+    }
+    one = len(json.dumps(row, separators=(",", ":"))) + 1
+    rows = [
+        {**row, "date": f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}"}
+        for i in range(target_bytes // one)
+    ]
+    return {
+        "currency": "USD",
+        "count": len(rows),
+        "next_cursor": "2027-12-31.opaque",
+        "rates": rows,
+        "provenance": [{"source": "fbil", "dataset": "fx", "stale": False}],
+        "warnings": ["page is full; continue with next_cursor"],
+    }
+
+
+def _sent_text(client: ScriptedClient) -> str:
+    content = client.calls[1]["messages"][2]["content"][0]["content"]
+    assert isinstance(content, str)
+    return content
+
+
+def _run_with(outcome: ToolOutcome) -> str:
+    client = ScriptedClient(
+        message([tool_use("fetch_all_offices", {})], "tool_use"), message([text("ok")])
+    )
+    run(client, FakeBackend({"fetch_all_offices": outcome}))
+    return _sent_text(client)
+
+
+def test_the_cap_sits_above_the_servers_text_cap() -> None:
+    assert MAX_TOOL_RESULT_CHARS == 64_000
+
+
+def test_a_36_kb_fx_page_reaches_the_model_whole() -> None:
+    page = _fx_page(36_700)
+    assert 36_000 < len(json.dumps(page, separators=(",", ":"))) < 40_000
+
+    sent = _run_with(ToolOutcome("", page))
+
+    assert json.loads(sent) == page
+    assert json.loads(sent)["next_cursor"] == "2027-12-31.opaque"
+
+
+def test_oversized_structured_result_drops_rows_and_keeps_every_other_key() -> None:
+    page = _fx_page(150_000)
+
+    sent = _run_with(ToolOutcome("", page))
+
+    parsed = json.loads(sent)  # still valid JSON
+    assert len(sent) <= MAX_TOOL_RESULT_CHARS
+    assert parsed["next_cursor"] == "2027-12-31.opaque"
+    assert parsed["provenance"] == page["provenance"]
+    assert parsed["warnings"] == page["warnings"]
+    assert parsed["count"] == page["count"]
+    kept = len(parsed["rates"])
+    assert 0 < kept < len(page["rates"])
+    assert parsed["rates"] == page["rates"][:kept]  # trailing rows are the ones dropped
+    assert parsed["truncated_rows"] == len(page["rates"]) - kept
+
+
+def test_oversized_structured_result_keeps_the_summary_line() -> None:
+    page = _fx_page(150_000)
+
+    sent = _run_with(ToolOutcome("USD rates, 1 Jan to 31 Dec.", page))
+
+    summary, _, body = sent.partition("\n")
+    assert summary == "USD rates, 1 Jan to 31 Dec."
+    assert json.loads(body)["next_cursor"] == "2027-12-31.opaque"
+    assert len(sent) <= MAX_TOOL_RESULT_CHARS
+
+
+def test_oversized_plain_text_is_cut_with_a_truncated_marker() -> None:
+    sent = _run_with(ToolOutcome("y" * (MAX_TOOL_RESULT_CHARS * 2)))
+
+    assert len(sent) <= MAX_TOOL_RESULT_CHARS + 50
+    assert sent.endswith("[output truncated]")
+
+
+def test_oversized_structured_result_without_a_list_falls_back_to_a_text_cut() -> None:
+    sent = _run_with(ToolOutcome("", {"blob": "z" * (MAX_TOOL_RESULT_CHARS * 2)}))
+
+    assert sent.endswith("[output truncated]")
+    assert len(sent) <= MAX_TOOL_RESULT_CHARS + 50

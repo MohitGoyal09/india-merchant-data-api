@@ -13,6 +13,7 @@ from imda.api.envelope import Used
 from imda.api.routes.sources import RECENT_RUNS, drift_view, freshness_view, worst_status
 from imda.health.freshness import FreshnessReport, assess_freshness
 from imda.mcp.context import Draft, ToolEnv, resource_text, run_tool
+from imda.mcp.sanitize import clean_text
 from imda.mcp.schemas import SourceHealthResult
 from imda.mcp.tools._common import READ_ONLY, UNTRUSTED_NOTE
 from imda.models import Dataset, Source, SourceStatus
@@ -36,6 +37,29 @@ HEALTH_DESCRIPTION = (
 )
 
 
+MAX_DRIFT_KEYS = 20
+MAX_ERROR_CHARS = 300
+
+
+def _capped_drift(drift: dict[str, object] | None) -> dict[str, object] | None:
+    """The drift report with long added/removed key lists cut to ``MAX_DRIFT_KEYS`` + a count."""
+    if drift is None:
+        return None
+    added = list(drift["added_keys"])  # type: ignore[call-overload]
+    removed = list(drift["removed_keys"])  # type: ignore[call-overload]
+    return {
+        **drift,
+        "added_keys": added[:MAX_DRIFT_KEYS],
+        "removed_keys": removed[:MAX_DRIFT_KEYS],
+        "added_count": len(added),
+        "removed_count": len(removed),
+    }
+
+
+def _short_error(value: object) -> str | None:
+    return None if value is None else clean_text(str(value), MAX_ERROR_CHARS)
+
+
 def _item(
     key: tuple[str, str], row: Mapping[str, Any] | None, fresh: FreshnessReport | None
 ) -> dict[str, object]:
@@ -47,8 +71,8 @@ def _item(
         "checked_at": row.get("checked_at"),
         "last_success_at": row.get("last_success_at"),
         "last_error_at": row.get("last_error_at"),
-        "last_error": row.get("last_error"),
-        "drift": drift_view(row.get("drift")),
+        "last_error": _short_error(row.get("last_error")),
+        "drift": _capped_drift(drift_view(row.get("drift"))),
         "freshness": freshness_view(fresh),
     }
 

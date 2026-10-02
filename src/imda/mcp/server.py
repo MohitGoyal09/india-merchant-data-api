@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+import ipaddress
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult, InputRequiredResult
 from starlette.applications import Starlette
 
@@ -86,8 +88,58 @@ def build_server(
     return server
 
 
-def build_http_app(server: MCPServer, token: str, *, host: str = "127.0.0.1") -> Starlette:
-    """Streamable HTTP at ``/mcp``, behind the bearer-token guard."""
-    app = server.streamable_http_app(streamable_http_path=HTTP_PATH, host=host)
+def is_loopback_host(host: str) -> bool:
+    """True for ``localhost`` and loopback IP addresses (127.0.0.0/8, ::1)."""
+    name = host.strip().strip("[]").lower()
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def transport_security_for(allowed_hosts: Sequence[str]) -> TransportSecuritySettings:
+    """DNS-rebinding protection that accepts only the given ``HOST[:PORT]`` values.
+
+    A value without a port matches that host on any port (a proxy normally sends the bare
+    host). A value with a port matches that exact ``Host`` header. ``Origin`` (when a browser
+    sends one) must be an http or https origin of the same hosts.
+    """
+    hosts: list[str] = []
+    origins: list[str] = []
+    for value in allowed_hosts:
+        patterns = [value] if _has_port(value) else [value, f"{value}:*"]
+        hosts.extend(patterns)
+        origins.extend(
+            f"{scheme}://{pattern}" for pattern in patterns for scheme in ("http", "https")
+        )
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
+
+
+def _has_port(host: str) -> bool:
+    if host.startswith("["):  # [::1]:8100 or [::1]
+        return "]:" in host
+    return host.count(":") == 1
+
+
+def build_http_app(
+    server: MCPServer,
+    token: str,
+    *,
+    host: str = "127.0.0.1",
+    transport_security: TransportSecuritySettings | None = None,
+) -> Starlette:
+    """Streamable HTTP at ``/mcp``, behind the bearer-token guard.
+
+    ``transport_security`` defaults to the SDK's loopback-only Host/Origin check.
+    """
+    app = server.streamable_http_app(
+        streamable_http_path=HTTP_PATH, host=host, transport_security=transport_security
+    )
     app.add_middleware(BearerAuthMiddleware, token=token)
     return app

@@ -62,12 +62,12 @@ class ToolOutcome:
         if self.structured is None:
             return self.text
         compact = json.dumps(self.structured, ensure_ascii=False, separators=(",", ":"))
-        if not self.text.strip() or _same_json(self.text, self.structured):
+        if not self.text.strip() or same_json(self.text, self.structured):
             return compact
         return f"{self.text}\n{compact}"
 
 
-def _same_json(text: str, structured: Any) -> bool:
+def same_json(text: str, structured: Any) -> bool:
     try:
         return bool(json.loads(text) == structured)
     except ValueError:
@@ -88,11 +88,11 @@ def _without_json_copy(text: str, structured: Any) -> str:
     ``structuredContent``)."""
     if structured is None:
         return text
-    if _same_json(text, structured):
+    if same_json(text, structured):
         return ""
     position = text.find("\n\n")
     while position != -1:
-        if _same_json(text[position + 2 :], structured):
+        if same_json(text[position + 2 :], structured):
             return text[:position]
         position = text.find("\n\n", position + 2)
     return text

@@ -61,3 +61,20 @@ def test_raw_payload_text_decodes_safely():
         duration_ms=1,
     )
     assert raw.text().startswith("ok")
+
+
+@pytest.mark.parametrize("name", ["IMDA_ADMIN_TOKEN", "IMDA_MCP_TOKEN"])
+def test_token_whitespace_is_stripped_before_the_length_check(monkeypatch, name):
+    secret = "k" * 32
+    monkeypatch.setenv(name, f"  {secret}\n")
+    settings = Settings(_env_file=None)
+    stored = settings.admin_token if name == "IMDA_ADMIN_TOKEN" else settings.mcp_token
+    assert stored is not None
+    assert stored.get_secret_value() == secret
+
+
+@pytest.mark.parametrize("name", ["IMDA_ADMIN_TOKEN", "IMDA_MCP_TOKEN"])
+def test_padding_does_not_make_a_short_token_long_enough(monkeypatch, name):
+    monkeypatch.setenv(name, "  " + "k" * 31 + "  \n")
+    with pytest.raises(ValueError, match="at least 32"):
+        Settings(_env_file=None)

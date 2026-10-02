@@ -2241,7 +2241,13 @@
           "DriftItem": {
             "additionalProperties": false,
             "properties": {
+              "added_count": {
+                "description": "How many keys were added (may exceed the list).",
+                "title": "Added Count",
+                "type": "integer"
+              },
               "added_keys": {
+                "description": "At most 20 keys; see `added_count` for the total.",
                 "items": {
                   "type": "string"
                 },
@@ -2270,7 +2276,13 @@
                 ],
                 "title": "Note"
               },
+              "removed_count": {
+                "description": "How many keys were removed (may exceed the list).",
+                "title": "Removed Count",
+                "type": "integer"
+              },
               "removed_keys": {
+                "description": "At most 20 keys; see `removed_count` for the total.",
                 "items": {
                   "type": "string"
                 },
@@ -2286,6 +2298,8 @@
               "drifted",
               "added_keys",
               "removed_keys",
+              "added_count",
+              "removed_count",
               "changed_keys",
               "note",
               "summary"

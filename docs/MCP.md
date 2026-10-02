@@ -37,6 +37,7 @@ Options of `imda mcp`:
 |---|---|---|
 | `--transport stdio\|http` | `stdio` | stdio for Claude Code and Desktop. http for remote hosts. |
 | `--host`, `--port` | `127.0.0.1`, `8100` | Bind address (http only). |
+| `--allowed-host` | none | `HOST[:PORT]` allowed in the `Host` header (http only, repeatable). Required when `--host` is not a loopback address. |
 | `--toolsets` | all | Comma list of `calendar,settlement,fx,rates,health`. Only those tools are registered. |
 
 The server reads `IMDA_DB_PATH` (default `data/imda.sqlite3`). It never calls RBI or FBIL.
@@ -227,8 +228,11 @@ Real example: `fetch_holidays` with `office=mumbai, year=2031`:
 | Read-only database | The SQLite file is opened read-only for each call. |
 | stdio | No token. The host starts the process, so it runs with the permissions of that user. |
 | HTTP bearer token | `IMDA_MCP_TOKEN`, at least 32 characters. Compared in constant time (`hmac.compare_digest` on SHA-256 digests). A bad token gives `401`. The token is never logged or echoed. |
-| HTTP bind | `127.0.0.1` by default. The SDK turns on DNS-rebinding protection for loopback hosts (`127.0.0.1`, `localhost`, `::1`). Put TLS and a proxy in front for a remote host. |
-| Untrusted text | Holiday names and error texts come from scraped pages. The server removes control, zero-width and bidi characters and caps length. The server `instructions` and the tool descriptions tell the model to treat such text as data, never as instructions. |
+| HTTP bind | `127.0.0.1` by default. The SDK turns on DNS-rebinding protection for loopback hosts (`127.0.0.1`, `localhost`, `::1`). The server speaks plain HTTP: terminate TLS at a proxy. A non-loopback `--host` is refused unless you pass `--allowed-host HOST[:PORT]` (repeatable); only those `Host` values (and their `Origin`s) are served, others get `421` or `403`. |
+| Token handling | One shared token, no per-client identity. Surrounding whitespace is trimmed, and the server refuses a token shorter than 32 characters. Each `401` is logged at WARNING with method, path and client address only. |
+| Concurrency | At most 8 tool calls run at once. Extra calls wait; they do not fail. Structured results above 48 KB are returned with trailing list items removed and a warning. |
+| Read-only mode and WAL | The database is opened with `mode=ro` and never modified, but SQLite creates `-wal` and `-shm` files next to it. The directory must be writable. |
+| Untrusted text | Holiday names and error texts come from scraped pages. The server applies NFKC, removes control, format (zero-width, bidi, tag), private-use, unassigned and filler characters, and caps each string at 300 characters. This stops hidden structure, not a plain-language "ignore your instructions" sentence: that relies on the model treating tool text as data. The `settlement_answer` prompt caps the question at 1,000 characters and puts it in a `<merchant_question>` block marked as data. The server `instructions` and the tool descriptions tell the model to treat such text as data, never as instructions. |
 | No secrets in output | Errors show field names and rules, not the rejected values. Unknown exceptions are logged and replaced by `INTERNAL_ERROR`. |
 
 ## 8. Testing
