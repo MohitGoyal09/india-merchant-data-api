@@ -280,8 +280,13 @@ class FxService:
         return CompareReport(currency, start, end, rows, summary)
 
     def _missing_reason(self, day: dt.date, source: SourceChoice) -> str:
-        """Why ``day`` itself has no rate (first match wins)."""
-        if self._is_unpublished_yet(day):
+        """Why ``day`` itself has no rate (first match wins).
+
+        A future date is "not yet published". For today, a weekend or holiday reason wins over
+        "not yet published", because no rate will be published at all on a non-working day.
+        """
+        today = self._today_ist()
+        if day > today:
             return "not yet published"
         weekday = day.weekday()
         if weekday == _SATURDAY:
@@ -291,19 +296,24 @@ class FxService:
         holiday = self._holiday_reason(day)
         if holiday is not None:
             return holiday
+        if day == today and self._before_cutoff():
+            return "not yet published"
         if source == "rbi" and RBI_GAP[0] <= day <= RBI_GAP[1]:
             return f"RBI did not publish reference rates between {RBI_GAP[0]} and {RBI_GAP[1]}"
         return "no publication on this date"
 
-    def _is_unpublished_yet(self, day: dt.date) -> bool:
+    def _now_ist(self) -> dt.datetime:
         now = self._now()
         if now.tzinfo is None:
             raise ValueError("now() must return a timezone-aware datetime")
-        now_ist = now.astimezone(IST)
-        if day != now_ist.date():
-            return day > now_ist.date()
+        return now.astimezone(IST)
+
+    def _today_ist(self) -> dt.date:
+        return self._now_ist().date()
+
+    def _before_cutoff(self) -> bool:
         cutoff = dt.time.fromisoformat(self._settings.fx_publish_cutoff_ist)
-        return now_ist.time().replace(tzinfo=None) < cutoff
+        return self._now_ist().time().replace(tzinfo=None) < cutoff
 
     def _holiday_reason(self, day: dt.date) -> str | None:
         if self._calendar is None:

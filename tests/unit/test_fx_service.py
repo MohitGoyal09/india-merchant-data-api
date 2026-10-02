@@ -204,6 +204,14 @@ class TestAsOf:
         res = service(rows, now=at(D(2026, 3, 10), 10, 0)).as_of(USD, D(2026, 3, 10))
         assert (res.reason, res.effective_date) == ("not yet published", D(2026, 3, 9))
 
+    def test_today_holiday_beats_not_yet_published(self) -> None:
+        # Real case found on 2026-10-02 (Gandhi Jayanti): no rate will ever be published today.
+        rows = [rate(D(2026, 1, 23), "90.00")]
+        res = service(rows, calendar=calendar_2026(), now=at(D(2026, 1, 26), 10, 0)).as_of(
+            USD, D(2026, 1, 26)
+        )
+        assert (res.reason, res.effective_date) == ("Republic Day", D(2026, 1, 23))
+
     def test_today_after_cutoff_without_row_is_plain_missing(self) -> None:
         rows = [rate(D(2026, 3, 9), "90.00")]
         res = service(rows, now=at(D(2026, 3, 10), 14, 0)).as_of(USD, D(2026, 3, 10))
