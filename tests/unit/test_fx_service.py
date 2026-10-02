@@ -326,7 +326,16 @@ class TestConvert:
 
     @pytest.mark.parametrize(
         "amount",
-        [DEC("0"), DEC("-1"), DEC("1.001"), DEC("NaN"), DEC("Infinity")],
+        [
+            DEC("0"),
+            DEC("-1"),
+            DEC("1.001"),
+            DEC("NaN"),
+            DEC("Infinity"),
+            DEC("1E+30"),  # too many digits to quantize: must be InvalidInput, not InvalidOperation
+            DEC("9" * 27),
+            DEC("1250000000000000000000000"),  # valid itself, but the converted result overflows
+        ],
     )
     def test_invalid_amounts(self, amount: Decimal) -> None:
         with pytest.raises(InvalidInput, match="amount"):

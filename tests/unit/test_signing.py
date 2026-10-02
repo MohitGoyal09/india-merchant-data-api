@@ -93,3 +93,7 @@ def test_sign_refuses_an_empty_secret() -> None:
 def test_verify_is_false_for_an_empty_secret() -> None:
     forged = hmac.new(b"", f"{TS}.".encode() + BODY, hashlib.sha256).hexdigest()
     assert signing.verify("", BODY, forged, timestamp=TS, now=TS) is False
+
+
+def test_verify_returns_false_for_a_signature_that_is_not_valid_utf8_text() -> None:
+    assert signing.verify(SECRET, BODY, "\ud800", timestamp=TS, now=TS) is False

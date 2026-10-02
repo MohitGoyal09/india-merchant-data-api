@@ -77,4 +77,5 @@ def verify(
         if abs(current - timestamp) > tolerance:
             return False
     expected = sign(secret, body, timestamp)
-    return hmac.compare_digest(expected.encode("utf-8"), signature.encode("utf-8"))
+    # "replace": a signature that is not valid UTF-8 text (a lone surrogate) can never match hex.
+    return hmac.compare_digest(expected.encode("utf-8"), signature.encode("utf-8", "replace"))

@@ -11,7 +11,7 @@ import math
 import statistics
 from collections.abc import Callable
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from itertools import pairwise
 from typing import Literal, Protocol
 
@@ -151,13 +151,20 @@ def _merge_auto(rows: list[FxRate]) -> list[FxRate]:
 
 
 def _quantize_cents(value: Decimal) -> Decimal:
-    return value.quantize(_CENT, rounding=ROUND_HALF_UP)
+    try:
+        return value.quantize(_CENT, rounding=ROUND_HALF_UP)
+    except InvalidOperation:  # result has more digits than the decimal context can hold
+        raise InvalidInput("amount is too large") from None
 
 
 def _validate_amount(amount: Decimal) -> None:
     if not amount.is_finite() or amount <= 0:
         raise InvalidInput("amount must be a positive number")
-    if amount != amount.quantize(_CENT):
+    try:
+        has_cents_only = amount == amount.quantize(_CENT)
+    except InvalidOperation:  # more digits than the decimal context can hold
+        raise InvalidInput("amount is too large") from None
+    if not has_cents_only:
         raise InvalidInput("amount must have at most 2 decimal places")
 
 

@@ -43,7 +43,10 @@ def clean_text(value: str, limit: int = MAX_TEXT_CHARS) -> str:
         for char in unicodedata.normalize("NFKC", value)
         if char.isspace() or not _is_dropped(char)
     ]
-    collapsed = _WHITESPACE.sub(" ", "".join(kept)).strip()
+    # Normalise again: removing an invisible character can leave a letter next to a combining
+    # mark that now composes ("a" + ZWJ + U+0308), and cleaning must be idempotent.
+    stable = unicodedata.normalize("NFKC", "".join(kept))
+    collapsed = _WHITESPACE.sub(" ", stable).strip()
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - len(ELLIPSIS)] + ELLIPSIS

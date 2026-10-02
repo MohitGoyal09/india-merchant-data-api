@@ -87,3 +87,10 @@ def test_clean_strings_recurses() -> None:
         "a": ["x y", {"b": "pq"}],
         "n": 3,
     }
+
+
+def test_cleaning_is_idempotent_when_removal_makes_a_letter_and_mark_compose() -> None:
+    once = clean_text("a‍̈")  # letter, ZWJ, combining diaeresis
+
+    assert once == "ä"
+    assert clean_text(once) == once
