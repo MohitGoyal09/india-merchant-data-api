@@ -101,11 +101,11 @@ Add `"negate": true` to require that a check does NOT hold (for example, no inve
 
 | Metric | Result |
 |---|---|
-| Pass rate | **12/12 (100%)**, bar 11/12 |
+| Pass rate | **12/12 (100%)** in two consecutive runs, bar 11/12 |
 | Tool selection | 100% |
 | Average tool calls | 1.2 |
 | Tokens | 14,289 input, 5,723 output, 8,053 cache write, 193,272 cache read |
 | Cost | about USD 0.25 |
 
-Full results: [`docs/demo/agent-eval-2026-10-02.json`](../docs/demo/agent-eval-2026-10-02.json).
-Live demo transcript (real data): [`docs/demo/usd-invoice-settlement.md`](../docs/demo/usd-invoice-settlement.md).
+Full results: [run 1](../docs/demo/agent-eval-2026-10-02.json), [run 2](../docs/demo/agent-eval-2026-10-02-run2.json).
+Live demo transcripts (real data): [USD invoice + Mumbai settlement](../docs/demo/usd-invoice-settlement.md), [Chennai holiday + JPY invoice](../docs/demo/chennai-holiday-and-jpy.md).

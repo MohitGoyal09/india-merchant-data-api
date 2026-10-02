@@ -1,0 +1,435 @@
+{
+  "timestamp": "2026-10-02T08:07:32+00:00",
+  "model": "claude-opus-5-5",
+  "effort": "medium",
+  "fallback": true,
+  "fixed_now": "2026-09-30T15:00:00+05:30",
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "pass_rate": 1.0,
+    "bar": "11/12",
+    "meets_bar": true,
+    "tool_selection_accuracy": 1.0,
+    "avg_tool_calls": 1.25,
+    "input_tokens": 14172,
+    "output_tokens": 5807,
+    "cache_creation_input_tokens": 8181,
+    "cache_read_input_tokens": 196344,
+    "estimated_cost_usd": 0.253
+  },
+  "cases": [
+    {
+      "id": "usd_invoice_inr_and_settlement",
+      "question": "A customer paid USD 1,200 for an invoice dated 24 September 2026, captured at 11:00 IST that day. What is that in INR at the official reference rate, and when will it settle for a Mumbai merchant?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "quote_invoice",
+          "args": {
+            "amount": 1200.0,
+            "currency": "USD",
+            "invoice_date": "2026-09-24",
+            "office": "mumbai",
+            "captured_at": "2026-09-24T11:00:00+05:30"
+          },
+          "is_error": false,
+          "duration_ms": 23
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 1331,
+        "output_tokens": 697,
+        "cache_creation_input_tokens": 8181,
+        "cache_read_input_tokens": 8181
+      },
+      "answer": "USD 1,200 comes to **INR 1,15,091.88**. For a Mumbai merchant, the estimated settlement date is **Monday, 28 September 2026**.\n\n**Rate**\n- The rate is FBIL's USD/INR reference rate for 24 September 2026, the invoice date itself: 95.9099 INR per USD, published at 13:00 IST that day.\n- 1,200 × 95.9099 = 1,15,091.88.\n- This is the official reference rate. It is not the rate a bank, card network or payment gateway would actually charge.\n\n**Settlement (T+2 working days, Mumbai RBI holidays)**\n- The payment was captured on Thursday, 24 September at 11:00 IST.\n- Working day 1 is Friday, 25 September.\n- Saturday, 26 September is skipped because it's the 4th Saturday.\n- Sunday, 27 September is skipped because it's a Sunday.\n- Working day 2 is Monday, 28 September.\n\nThis is only an estimate. It's based on RBI's Mumbai holiday list and the T+2 rule, not the payment provider's own schedule. It doesn't account for cut-off times, rules for different payment methods, or holds on the payment.\n\nThe FBIL rate data has a staleness warning: the latest rate it holds is for 24 September, but it should have rates up to 30 September. This doesn't affect your answer, because the rate for 24 September is there."
+    },
+    {
+      "id": "mumbai_holiday_mar31",
+      "question": "Are banks in Mumbai open on 31 March 2026? If not, say why.",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "check_business_day",
+          "args": {
+            "date": "2026-03-31",
+            "office": "mumbai"
+          },
+          "is_error": false,
+          "duration_ms": 12
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 510,
+        "output_tokens": 236,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "No. Banks in Mumbai are closed on Tuesday, 31 March 2026.\n\nRBI's holiday list for the Mumbai regional office marks that day as a bank holiday for Mahavir Janmakalyanak/Mahavir Jayanti. It is a weekday, so the holiday is the only reason banks are shut.\n\nNote: This comes from RBI's published list, last updated on 25 September 2026. It doesn't cover local strikes or closures at a particular bank."
+    },
+    {
+      "id": "t2_settlement_skipped_days",
+      "question": "A payment was captured on 27 March 2026 at 11:00 IST. With a T+2 cycle for a Mumbai merchant, when should it settle, and which days are skipped?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "estimate_settlement_date",
+          "args": {
+            "captured_at": "2026-03-27T11:00:00+05:30",
+            "office": "mumbai",
+            "cycle_days": 2
+          },
+          "is_error": false,
+          "duration_ms": 15
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 943,
+        "output_tokens": 457,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "It should settle on Thursday, 2 April 2026. This is an estimate.\n\nThe payment was captured on Friday, 27 March 2026 (T). T+2 means two bank working days after that day, using Mumbai's RBI holiday calendar:\n- Working day 1: Monday, 30 March 2026\n- Working day 2: Thursday, 2 April 2026, the estimated settlement date\n\nDays skipped (4):\n- Saturday, 28 March: 4th Saturday\n- Sunday, 29 March: Sunday\n- Tuesday, 31 March: Mahavir Janmakalyanak/Mahavir Jayanti (bank holiday)\n- Wednesday, 1 April: banks' yearly closing of accounts\n\nThis date comes from RBI's Mumbai holiday list and the T+2 working-day rule. It isn't the payment provider's own settlement schedule. Cut-off times, rules for particular payment methods and any holds could change the actual date."
+    },
+    {
+      "id": "usd_rate_holiday_fallback",
+      "question": "What is the USD/INR reference rate for 14 September 2026? If there is no rate for that exact day, tell me which day's rate applies and why.",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "fetch_fx_rate",
+          "args": {
+            "currency": "USD",
+            "date": "2026-09-14"
+          },
+          "is_error": false,
+          "duration_ms": 18
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 818,
+        "output_tokens": 452,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "There was no USD/INR rate for 14 September 2026, so the rate that applies is the one from Friday, 11 September 2026: 1 USD = 95.7245 INR.\n\nWhy:\n- 14 September 2026 (Monday) was a holiday, listed as Ganesh Chaturthi/Ganesh Puja/Varasiddhi Vinayaka Vrata/Vinayakar Chathurthi/Hartalika, so no rate was published that day.\n- 12 and 13 September were a weekend, so 11 September was the last day before the holiday with a published rate.\n- This is FBIL's daily reference rate, published on 11 September 2026 at 13:00 IST. It is not the rate a bank or payment provider would actually use for a payment.\n\nNote: The FBIL rate data is out of date. It only goes up to 24 September 2026. That doesn't affect the 14 September answer, but rates after 24 September aren't available yet."
+    },
+    {
+      "id": "jpy_to_inr_per_100_unit",
+      "question": "How many rupees is JPY 1,000 worth on 24 September 2026, using the official reference rate?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "convert_currency",
+          "args": {
+            "amount": 1000.0,
+            "from_currency": "JPY",
+            "to_currency": "INR",
+            "date": "2026-09-24"
+          },
+          "is_error": false,
+          "duration_ms": 13
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 773,
+        "output_tokens": 402,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "JPY 1,000 was worth ₹606.20 on 24 September 2026.\n\n- **Rate used:** FBIL reference rate of ₹60.62 per 100 JPY (₹0.6062 per yen). FBIL published it for 24 September 2026, the date you asked about, so no earlier date was needed.\n- **Sum:** 1,000 × 0.6062 = ₹606.20.\n- **What this rate is:** It's the official reference rate. A bank, card network or payment gateway may have used a different rate.\n\nFBIL's rate data in this system stops at 24 September, so rates for later dates (up to today, 30 September) haven't been loaded yet. This doesn't change the figure for 24 September."
+    },
+    {
+      "id": "next_3_business_days_mumbai",
+      "question": "What are the next 3 bank working days in Mumbai after 27 March 2026?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "fetch_next_business_days",
+          "args": {
+            "date": "2026-03-27",
+            "office": "mumbai",
+            "count": 3
+          },
+          "is_error": false,
+          "duration_ms": 8
+        },
+        {
+          "name": "fetch_holidays",
+          "args": {
+            "office": "mumbai",
+            "year": 2026,
+            "month": 3
+          },
+          "is_error": false,
+          "duration_ms": 17
+        },
+        {
+          "name": "fetch_holidays",
+          "args": {
+            "office": "mumbai",
+            "year": 2026,
+            "month": 4
+          },
+          "is_error": false,
+          "duration_ms": 17
+        },
+        {
+          "name": "check_business_day",
+          "args": {
+            "date": "2026-03-28",
+            "office": "mumbai"
+          },
+          "is_error": false,
+          "duration_ms": 9
+        }
+      ],
+      "turns": 3,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 2493,
+        "output_tokens": 708,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 24543
+      },
+      "answer": "These are the next 3 bank working days in Mumbai after Friday, 27 March 2026:\n1. Monday, 30 March 2026\n2. Thursday, 2 April 2026\n3. Saturday, 4 April 2026 (it's the 1st Saturday, so banks are open)\n\nDays skipped:\n- Saturday, 28 March: 4th Saturday\n- Sunday, 29 March: Sunday\n- Tuesday, 31 March: Mahavir Janmakalyanak / Mahavir Jayanti\n- Wednesday, 1 April: banks closed to close their yearly accounts\n- Friday, 3 April: Good Friday\n\nSource: RBI holiday list for the Mumbai office, last updated 25 September 2026. This doesn't include local strikes or closures at individual banks."
+    },
+    {
+      "id": "rbi_vs_fbil_usd_sept",
+      "question": "How much do the RBI and FBIL USD/INR reference rates differ in September 2026?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "compare_fx_sources",
+          "args": {
+            "currency": "USD",
+            "from_date": "2026-09-01",
+            "to_date": "2026-09-30"
+          },
+          "is_error": false,
+          "duration_ms": 18
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 1754,
+        "output_tokens": 591,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "**They don't differ at all.** On the 17 days in September 2026 where both RBI and FBIL published a USD/INR reference rate, the two rates were exactly the same: 0.0000 INR and 0 bp difference every day. No day went over the 1 bp flag.\n\n- **Dates compared:** 1 to 24 September 2026, on days when both sources published. On those days the rate went from 94.8697 (1 Sep) to 95.9099 (24 Sep).\n- **Missing FBIL data:** The FBIL data is out of date. The latest FBIL rate held is for 24 September, but data up to 30 September should exist. So 25 to 30 September couldn't be compared.\n- **RBI-only days:** RBI has rates for 4 days in the month that FBIL doesn't have. These are probably dates after 24 September, but I didn't confirm which dates they are.\n\nSource: compare_fx_sources, using the RBI Reference Rate Archive and the FBIL reference rates. Both sets of data were fetched on 25 September 2026 at 04:00 UTC."
+    },
+    {
+      "id": "usd_inr_september_stats",
+      "question": "What was the average USD/INR reference rate in September 2026, and the lowest and highest?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "fetch_fx_stats",
+          "args": {
+            "currency": "USD",
+            "from_date": "2026-09-01",
+            "to_date": "2026-09-30",
+            "period": "month"
+          },
+          "is_error": false,
+          "duration_ms": 17
+        },
+        {
+          "name": "fetch_all_fx_rates",
+          "args": {
+            "currency": "USD",
+            "from_date": "2026-09-01",
+            "to_date": "2026-09-30"
+          },
+          "is_error": false,
+          "duration_ms": 18
+        }
+      ],
+      "turns": 3,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 3739,
+        "output_tokens": 850,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 24543
+      },
+      "answer": "For September 2026 (1 to 30 Sept, 21 published days), the USD/INR reference rate was:\n\n- Average: ₹95.4641 per USD\n- Lowest: ₹94.4467 on 7 Sept\n- Highest: ₹96.0321 on 29 Sept\n\nThe rate went from ₹94.8697 on 1 Sept to ₹95.9832 on 30 Sept, up about 1.17% over the month.\n\nThese figures mix two sources:\n- 1 to 24 Sept are FBIL rates.\n- 25 to 30 Sept (four rates) are RBI rates. FBIL's data here was last updated with 24 Sept and is flagged as out of date, so no FBIL rates were available for those days. RBI and FBIL rates are usually very close, but I haven't checked them against each other here. Once FBIL's late-September rates are loaded, an all-FBIL figure could be a little different.\n\nNo rate was published on 14 Sept (a Monday), so it isn't in the average. The data doesn't give a reason, and I haven't checked whether it was a bank holiday.\n\nThese are reference rates, not the rate a bank or payment provider actually applied."
+    },
+    {
+      "id": "mibor_friday_3d_tenor",
+      "question": "What was the FBIL MIBOR on Friday 4 September 2026, and what tenor does that figure cover?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "fetch_mibor",
+          "args": {
+            "from_date": "2026-09-04",
+            "to_date": "2026-09-04"
+          },
+          "is_error": false,
+          "duration_ms": 16
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 653,
+        "output_tokens": 389,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "FBIL's MIBOR for Friday 4 September 2026 was 4.91% per annum. It's a 3-day rate (tenor \"3D\"), not an overnight one.\n\n- **What it covers:** On Fridays, FBIL publishes a 3D rate instead of the usual overnight (O/N) rate. It covers money lent on Friday 4 September and repaid on Monday 7 September, so it spans the weekend.\n- **Source:** FBIL overnight MIBOR, published on 4 September 2026 at 12:45 IST.\n- **Data warning:** The MIBOR data is out of date. The latest figure held is for 24 September 2026, but data up to 30 September should be there. This doesn't affect the 4 September figure, but rates from after 24 September aren't available yet."
+    },
+    {
+      "id": "mumbai_holidays_april_2026",
+      "question": "List the bank holidays in Mumbai in April 2026.",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "fetch_holidays",
+          "args": {
+            "office": "mumbai",
+            "year": 2026,
+            "month": 4
+          },
+          "is_error": false,
+          "duration_ms": 10
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 694,
+        "output_tokens": 567,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "RBI lists 3 bank holidays for the Mumbai office in April 2026:\n\n1. Wednesday 1 April: Closing of accounts (\"To enable Banks to close their yearly accounts\"). This is the banks' annual closing day, so branches are closed to the public.\n2. Friday 3 April: Good Friday.\n3. Tuesday 14 April: Dr. Babasaheb Ambedkar Jayanti. RBI lists this day under several regional names, including Baisakhi and Tamil New Year's Day.\n\nBanks are also closed on Sundays and the 2nd and 4th Saturdays, but RBI doesn't include those in its holiday list. In April 2026 those are 5, 12, 19 and 26 April (Sundays), and 11 and 25 April (2nd and 4th Saturdays). I worked those dates out from the calendar.\n\nSource: RBI holiday list for the Mumbai office, last updated 25 September 2026 and marked as current."
+    },
+    {
+      "id": "holidays_2010_not_loaded",
+      "question": "List the bank holidays in Mumbai for 2010.",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [
+        {
+          "name": "fetch_holidays",
+          "args": {
+            "office": "mumbai",
+            "year": 2010
+          },
+          "is_error": true,
+          "duration_ms": 5
+        }
+      ],
+      "turns": 2,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 372,
+        "output_tokens": 263,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16362
+      },
+      "answer": "I can't list them: the RBI holiday calendar for Mumbai in 2010 isn't loaded in my data source. The tool returned CALENDAR_DATA_MISSING.\n\nThis doesn't mean Mumbai had no bank holidays in 2010. That year's data just isn't available here. RBI's own archive of holiday notifications for the Mumbai office would have the official 2010 list.\n\nI can list Mumbai holidays for a year that is loaded, such as 2025 or 2026."
+    },
+    {
+      "id": "gst_rate_out_of_scope",
+      "question": "What GST rate applies to cotton t-shirts?",
+      "passed": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "failures": [],
+      "tool_calls": [],
+      "turns": 1,
+      "stop_reason": "end_turn",
+      "model_served": "claude-opus-5-5",
+      "fallback_used": false,
+      "refusal": null,
+      "usage": {
+        "input_tokens": 92,
+        "output_tokens": 195,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8181
+      },
+      "answer": "I can't answer that with the tools I have. GST rates are outside what I can look up. My tools only cover RBI bank holidays, working days, settlement timing, RBI/FBIL FX reference rates and FBIL MIBOR, so I won't guess a rate.\n\nFor the correct GST rate on cotton t-shirts, check the CBIC GST rate notifications or the GST portal, or ask a tax advisor. The rate can depend on the HSN code and the sale price.\n\nIf you have a question about settlement dates, bank holidays or converting a foreign-currency invoice to INR, I can help with that."
+    }
+  ]
+}
