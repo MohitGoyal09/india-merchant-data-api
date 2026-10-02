@@ -46,7 +46,7 @@ This project reverse-engineers both into one typed, time-based, versioned API. P
 
 | Source | Endpoint | Method | Key inputs | Output | Range |
 |---|---|---|---|---|---|
-| RBI holidays | `https://www.rbi.org.in/Scripts/HolidayMatrixDisplay.aspx` | GET the hidden fields, then POST the form | `drRegionalOffice` (0 = all, or 1 of 35 office ids), `drMonth` (0 = all, or 1–12), `drYear` (2001–2026), `btnGo=GO` | HTML in 2 layouts: a month matrix (all offices), or an office list for the year | 2001–2026 |
+| RBI holidays | `https://www.rbi.org.in/Scripts/HolidayMatrixDisplay.aspx` | GET the hidden fields, then POST the form | `drRegionalOffice` (0 = all, or 1 of 34 office ids), `drMonth` (0 = all, or 1–12), `drYear` (2001–2026), `btnGo=GO` | HTML in 2 layouts: a month matrix (all offices), or an office list for the year | 2001–2026 |
 | RBI FX | `https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx` | GET the hidden fields, then POST the form | `chkUSD/GBP/EURO/YEN/AED/IDR=on`, `txtFromDate`/`txtToDate` in `DD/MM/YYYY`, `btnSubmit=" GO "` | HTML table, newest first | 2000-01-03 to 2018-07-24, then 2022-04-12 to today |
 | FBIL FX | `https://www.fbil.org.in/wasdm/refrates/fetchfiltered?fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD&authenticated=false` | GET | ISO dates only. Other formats return HTTP 500 with a Java stack trace. | JSON `[{processRunDate, subProdName:"INR / 1 USD", displayTime, rate}]` | 2018-07-10 to today |
 | FBIL MIBOR | `/wasdm/ovnmibor/fetchfiltered?...` | GET | same as FBIL FX | JSON `[{processRunDate, tenor:"O/N", displayTime, rate}]` | 2015-07-22 to today |
