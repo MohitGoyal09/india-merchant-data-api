@@ -17,8 +17,8 @@ uv run python evals/run_agent_evals.py --bar 0.8     # a looser bar (default 0.9
 
 Exit codes: `0` bar met, `1` below the bar or an invalid case file, `2` no credentials.
 
-A real run costs about USD 1.5 on Claude Opus 5.5 (the summary prints the exact estimate at
-$4 / $20 per million input / output tokens, with cache tokens at their own rates). It writes
+A real run of the 16 cases costs about USD 0.28 on Claude Opus 5.5 (run 4; the summary prints the
+exact estimate at $4 / $20 per million input / output tokens, with cache tokens at their own rates). It writes
 `evals/results/<UTC timestamp>.json`. Those files are git-ignored.
 
 ## How a run works
@@ -144,15 +144,34 @@ Category map: `fx` = rate lookups and conversion, `rates` = FX statistics and MI
 - With the refusal fallback on (default), a declined request re-runs on another model. The results
   file records `model_served` and `fallback_used`. Cost for a fallback call uses Opus 5.5 rates.
 
-## Latest live run (2026-10-02, `claude-opus-5-5`, fixture DB)
+## Live run history
 
-| Metric | Result |
-|---|---|
-| Pass rate | **12/12 (100%)** in two consecutive runs, bar 11/12 |
-| Tool selection | 100% |
-| Average tool calls | 1.2 |
-| Tokens | 14,289 input, 5,723 output, 8,053 cache write, 193,272 cache read |
-| Cost | about USD 0.25 |
+All runs use `claude-opus-5-5` (effort `medium`, refusal fallback on) on the fixture DB with the clock fixed at 2026-09-30 15:00 IST. Numbers come from the `summary` of each results file.
 
-Full results: [run 1](../docs/demo/agent-eval-2026-10-02.json), [run 2](../docs/demo/agent-eval-2026-10-02-run2.json).
+| Run | Date (UTC) | Cases | Result | Cost (est.) | File |
+|---|---|---|---|---|---|
+| 1 | 2026-10-02 | 12 | 12/12, bar 11/12 met | USD 0.25 | [agent-eval-2026-10-02.json](../docs/demo/agent-eval-2026-10-02.json) |
+| 2 | 2026-10-02 | 12 | 12/12, bar 11/12 met | USD 0.25 | [agent-eval-2026-10-02-run2.json](../docs/demo/agent-eval-2026-10-02-run2.json) |
+| 3 | 2026-10-02 | 16 | 14/16 (87.5%), bar 15/16 **not met** | USD 0.29 | [agent-eval-2026-10-02-run3-16cases-before-check-fix.json](../docs/demo/agent-eval-2026-10-02-run3-16cases-before-check-fix.json) |
+| 4 | 2026-10-02 | 16 | **16/16 (100%)**, bar 15/16 met | USD 0.28 | [agent-eval-2026-10-02-run4-16cases.json](../docs/demo/agent-eval-2026-10-02-run4-16cases.json) |
+
+**About run 3.** Run 3 was the first run of the 16-case file, and it failed the bar. Two answers (`holidays_2010_not_loaded` in `error_recovery`, `write_request_refused` in `safety`) were correct, but the regex checks were too narrow and rejected them. We read the saved answers, widened the two checks, and added regression tests that score the real answers: `tests/unit/test_agent_evals.py::test_real_live_answers_are_scored_correctly`. Then we ran again (run 4) and it passed. We keep the run 3 file with "before-check-fix" in its name so the history stays honest. The rule is in Notes above: widen a check only when the answer was right.
+
+**Run 4 by category.**
+
+| Category | Passed | Rate |
+|---|---|---|
+| fx | 2/2 | 100% |
+| settlement | 1/1 | 100% |
+| calendar | 3/3 | 100% |
+| invoice | 1/1 | 100% |
+| rates | 2/2 | 100% |
+| comparison | 1/1 | 100% |
+| error_recovery | 2/2 | 100% |
+| out_of_scope | 2/2 | 100% |
+| safety | 2/2 | 100% |
+| **Total** | **16/16** | **100%** |
+
+Run 4 other metrics: tool selection 100%, average tool calls 1.125, tokens 16,838 input, 8,010 output, 0 cache write, 261,792 cache read.
+
 Live demo transcripts (real data): [USD invoice + Mumbai settlement](../docs/demo/usd-invoice-settlement.md), [Chennai holiday + JPY invoice](../docs/demo/chennai-holiday-and-jpy.md).

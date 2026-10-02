@@ -155,7 +155,7 @@
         "additionalProperties": false,
         "properties": {
           "events": {
-            "description": "Any of fx.rates.published, holidays.updated, source.degraded, source.recovered, or '*' for all",
+            "description": "Any of fx.rates.published, holidays.updated, holidays.year_available, source.degraded, source.recovered, or '*' for all",
             "items": {
               "type": "string"
             },
@@ -355,6 +355,79 @@
           }
         },
         "summary": "Liveness (no database access)",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "200 when the database is migrated, FX and holidays are loaded and no source is broken.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown office, route or rate"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Holiday data for that year is not loaded"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request body too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "description": "Not ready: see `checks` for the reason"
+          }
+        },
+        "summary": "Readiness (read-only database checks)",
         "tags": [
           "meta"
         ]

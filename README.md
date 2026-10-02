@@ -18,7 +18,7 @@ every response. It is a take-home for the Razorpay "reverse-engineer an API" tas
 | Business-day engine and settlement ETA | Per office. 2nd and 4th Saturdays, Sundays and holidays are not working days. | Computed from the holidays |
 | Invoice quote | INR value of a foreign-currency invoice, plus settlement ETA | Computed |
 | ICS feed | One calendar per office and year | Computed from the holidays |
-| Webhooks | HMAC-signed events: rates published, holidays updated, source degraded or recovered | Local |
+| Webhooks | HMAC-signed events: rates published, holidays updated, new holiday year available, source degraded or recovered | Local |
 | Health and drift | Status, drift report and freshness for each source | Local |
 
 ## How it works
@@ -185,8 +185,27 @@ erDiagram
 | Rows in the database | 30,912 FX (2000-01-03 to 2026-10-01), 2,703 MIBOR (from 2015-07-22), 13,282 holidays (34 offices, 2001 to 2026) |
 | Upstream requests | about 380 for the full history (41 MB), 47 for a backfill from 2024-01-01, 6 to 8 for a daily refresh |
 | REST cases (`make cases`) | 31 cases: 30 passed, 0 failed, 1 skipped |
-| Tests (`make check`, 2026-10-02) | 1,295 passed, 98.68% coverage (gate 80%); 227 of them are MCP contract tests |
-| Agent eval (live, `claude-opus-5-5`) | 12/12 passed, tool selection 100%, about USD 0.25 |
+| Tests (`make check`, 2026-10-02) | 1,491 passed, 98.45% coverage (gate 80%); `mypy --strict` clean on 85 source files |
+| Property tests (`tests/property`) | 60 passed |
+| MCP contract tests (`tests/mcp`) | 238 passed |
+| Keyless MCP demo (`make demo-mcp`) | 21/21 checks passed |
+| Agent eval (live, `claude-opus-5-5`, run 4) | 16/16 passed in 9 categories (incl. safety), tool selection 100%, about USD 0.28. History: [evals/README.md](evals/README.md#live-run-history) |
+| Security scans (`make security`) | `bandit` clean (medium and above), `pip-audit`: no known vulnerabilities, secret scan: no secrets found |
+
+## Docs map
+| Document | What it answers |
+|---|---|
+| [REVERSE_ENGINEERING](docs/REVERSE_ENGINEERING.md) | How were the RBI and FBIL backends found, and what is the evidence? |
+| [LIMITATIONS](docs/LIMITATIONS.md) | What can break, what is an estimate, and what do the source terms allow? |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | How do the parts fit, and why were they built this way? |
+| [API](docs/API.md) | What are the envelope, error codes, pagination, CSV, ICS and webhook formats? |
+| [MCP](docs/MCP.md) | What tools does the agent connector have, and how do I connect a host? |
+| [FDE_PLAYBOOK](docs/FDE_PLAYBOOK.md) | How does a forward-deployed engineer take this to a merchant? |
+| [RUNBOOK](docs/RUNBOOK.md) | How do I run it every day, rotate tokens, back up, watch it and fix it? |
+| [SECURITY](docs/SECURITY.md) | What are the threats, the controls and the test evidence? |
+| [PLAN](docs/PLAN.md) | What was planned for the REST API, and why? |
+| [PLAN_MCP](docs/PLAN_MCP.md) | What was planned for the MCP connector and its evals? |
+| [evals/README](evals/README.md) | How are the agent evals built, scored and run, and what are the results? |
 
 ## Quickstart
 You need [uv](https://docs.astral.sh/uv/) and Python 3.12 or newer.
@@ -312,6 +331,19 @@ Real output of `make cases` (excerpt: the ENDPOINT and `ms` columns and 19 rows 
 
 `make cases-live` was also run against a server on the backfilled database: 30 passed, 0 failed, 1 skipped.
 
+## Merchant Console
+A static web page over the same REST API. It shows the rate in force on a date, a settlement ETA, an invoice quote, and source health. It needs no build step and no extra service.
+
+```bash
+make serve    # then open http://127.0.0.1:8000/console
+```
+
+The page sets a strict Content-Security-Policy: scripts, styles, images and fetches come only from the same origin, and framing is blocked. [Light, 1440 px](docs/screenshots/console-1440-light.png):
+
+![Merchant Console, 1440 px, light theme](docs/screenshots/console-1440-light.png)
+
+Other captures: [dark, 1440 px](docs/screenshots/console-1440-dark.png), [light, 375 px](docs/screenshots/console-375-light.png), [dark, 375 px](docs/screenshots/console-375-dark.png).
+
 ## Endpoints
 Read endpoints are open (meant for localhost). Admin endpoints need
 `Authorization: Bearer $IMDA_ADMIN_TOKEN`. Full spec: [docs/openapi.json](docs/openapi.json).
@@ -319,6 +351,8 @@ Read endpoints are open (meant for localhost). Admin endpoints need
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/healthz` | Liveness. No database access. |
+| GET | `/readyz` | Readiness. `200` only when the database is migrated, FX and holidays are loaded and no source is `broken`. Otherwise `503` with a reason for each check. |
+| GET | `/console` | The Merchant Console: a static page over this API (see below). |
 | GET | `/v1/offices` | The 34 RBI regional offices. |
 | GET | `/v1/holidays?year=&office=&month=` | Bank holidays. |
 | GET | `/v1/calendar/business-day?date=&office=` | Is the date a working day? If not, why. |
@@ -385,18 +419,26 @@ The method and the evidence are in [docs/REVERSE_ENGINEERING.md](docs/REVERSE_EN
 src/imda/   sources/ (rbi, fbil adapters)  http/ (PoliteClient)  ingest/  store/  domain/
             health/ (drift, canary)  events/ (webhooks)  api/ (FastAPI)  cli.py
 scripts/    run_cases.py, cases.py, fixture recorders
-tests/      unit/  api/  contract/  fixtures/
-docs/       PLAN, ARCHITECTURE, API, REVERSE_ENGINEERING, LIMITATIONS, openapi.json
+tests/      unit/  api/  property/  mcp/  contract/  fixtures/
+docs/       see the Docs map above
 ```
 
 Design and data flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Development
-| Command | What it does |
-|---|---|
-| `make check` | `ruff`, `mypy --strict`, and offline tests with coverage (gate: 80%). Result on 2026-10-02: 1,295 passed, 98.68% coverage. |
-| `make test-live` | 5 opt-in tests that call real RBI and FBIL (about 40 seconds). |
-| `make canary` | Sample each source once and check it against the baselines. |
+## Testing
+| Layer | Command | What it proves |
+|---|---|---|
+| Unit and API | `make check` | `ruff`, `mypy --strict` and the offline tests with coverage (gate 80%). 2026-10-02: 1,491 passed, 98.45%. |
+| Property | `uv run pytest tests/property` | 60 `hypothesis` tests. Set `HYPOTHESIS_PROFILE=ci` for the CI profile. |
+| Contract (live) | `make test-live` | 5 opt-in tests that call real RBI and FBIL (about 40 seconds). |
+| Assignment cases | `make cases`, `make cases-live` | 31 named cases: offline on fixtures, or against a running `make serve`. |
+| MCP contract | `make mcp-evals` | 238 tests of the 13 tools, with no LLM and no network. |
+| Keyless MCP demo | `make demo-mcp` | Starts `imda mcp` over stdio and runs 21 asserted checks. |
+| Docker smoke | `make smoke-compose` | Builds the image and probes `api` and `mcp` in an isolated compose project. Needs Docker. |
+| Security | `make security` | `bandit`, `pip-audit` and a scan of tracked files for secrets. |
+| Agent evals | `make agent-evals` | 16 merchant questions answered by Claude through MCP. Needs `ANTHROPIC_API_KEY`. Add `ARGS=--dry-run` to check the case file with no key. |
+
+Other command: `make canary` samples each source once and checks it against the baselines.
 
 ## Security notes
 - No credentials are in the repo. `.env` and `data/` are git-ignored. `.env.example` has no secrets.
@@ -410,7 +452,7 @@ Design and data flow: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```bash
 uv run imda mcp                                                        # stdio (Claude Code, Desktop)
 IMDA_MCP_TOKEN=<32+ chars> uv run imda mcp --transport http --port 8100   # streamable HTTP at /mcp, bearer token
-make mcp-evals                                                         # 152 offline contract tests
+make mcp-evals                                                         # 238 offline contract tests
 ```
 
 Every result has a summary line, JSON, `provenance` and `warnings`. Errors are results with `isError=true` and a `{code, message, hint}` body. The agent cannot write data, cannot call RBI or FBIL, and gives settlement dates as estimates.

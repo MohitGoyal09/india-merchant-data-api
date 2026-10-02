@@ -73,14 +73,19 @@ Desktop (`mcpServers` config), so the connector is host-agnostic.
 | Layer | What | How | Bar |
 |---|---|---|---|
 | 1. Tool contract (no LLM, runs in CI) | About 30 cases: every tool's happy path, errors (`isError` plus code), annotations (all read-only), output schema validity, provenance present, toolset filtering | In-memory MCP client session against a DB seeded from fixtures | **100%** |
-| 2. Agent (Claude, opt-in) | 12 merchant questions with known answers on the fixture DB | Score is deterministic, with no LLM judge. Each question must (a) call the required tool(s) and (b) state the expected facts (dates, INR amounts, holiday names) in the final answer, matched by regex or number with a tolerance. | **≥ 11/12 (92%)**, plus reported tool-selection accuracy, average tool calls, tokens and cost |
+| 2. Agent (Claude, opt-in) | 16 merchant questions in 9 categories (fx, settlement, calendar, invoice, rates, comparison, error_recovery, out_of_scope, safety) with known answers on the fixture DB | Score is deterministic, with no LLM judge. Each question must (a) call the required tool(s) and (b) state the expected facts (dates, INR amounts, holiday names) in the final answer, matched by regex or number with a tolerance. | **≥ 15/16 (92%)**, plus reported tool-selection accuracy, average tool calls, tokens and cost |
 
 The agent eval results are saved to `evals/results/<timestamp>.json`, and a summary table is
 printed.
 
-**Cost:** a full layer-2 run is about 12 questions × about 3 model turns. That is roughly
-200k input tokens and 20k output tokens, so **about USD 1.5 per run** on Claude Opus 5.5. Layer 2
-only runs when you ask for it and have set up credentials.
+**Cost:** the plan first guessed about USD 1.5 per run. Measured on the 16-case file (run 4,
+2026-10-02): 16,838 input tokens, 8,010 output tokens and 261,792 cache-read tokens, so **about
+USD 0.28 per run** on Claude Opus 5.5. Layer 2 only runs when you ask for it and have set up
+credentials.
+
+**Result:** run 4 passed 16/16 with tool selection 100%. Run 3 scored 14/16 (below the bar) because
+two correct answers failed regex checks that were too narrow. The checks were widened and
+regression tests were added. History: [evals/README.md](../evals/README.md#live-run-history).
 
 ## 6. Deliverables
 
@@ -103,7 +108,7 @@ only runs when you ask for it and have set up credentials.
 |---|---|---|
 | P1 | MCP server, 13 tools, schemas, errors, toolsets, stdio and HTTP with bearer auth, CLI, layer-1 contract evals | Contract evals 100%. `make check` green. MCP Inspector-style smoke test (list tools, call 3) over stdio and HTTP. |
 | P2 | Agent demo, agent eval harness with fake-client tests, `docs/MCP.md`, `mcp_tool_spec.json` | Tests green. Demo runs end-to-end against the fake client. |
-| P3 (needs your credentials) | A live agent demo run and a layer-2 eval run on Claude Opus 5.5 | ≥ 11/12, with the transcript saved to `docs/demo/` |
+| P3 (needs your credentials) | A live agent demo run and a layer-2 eval run on Claude Opus 5.5 | ≥ 15/16, with the transcript saved to `docs/demo/`. Met: run 4 scored 16/16. |
 | P4 | Review: MCP security (auth, tool output size limits, no prompt injection carried through holiday names), docs refresh | No HIGH findings |
 
 P1 and P2 run in parallel (different files). P3 waits for your credentials.

@@ -26,7 +26,7 @@ Security tasks and test evidence are in [SECURITY.md](SECURITY.md).
 | 3. Edit `.env` | Put your contact in `IMDA_USER_AGENT`. Set `IMDA_ADMIN_TOKEN` (32+ characters). |
 | 4. Load data | `uv run imda backfill --from 2024-01-01` (47 requests, about 92 s) |
 | 5. Start API | `make serve` |
-| 6. Check | `curl -s http://127.0.0.1:8000/healthz` |
+| 6. Check | `curl -s http://127.0.0.1:8000/healthz` (alive) and `curl -s http://127.0.0.1:8000/readyz` (ready, see section 10) |
 
 Make a token: `python -c "import secrets;print(secrets.token_urlsafe(32))"`.
 For all history use `uv run imda backfill --from 2000-01-01`. It needs about 380 requests. At one request every 2 s, that takes at least 760 s.
@@ -216,3 +216,44 @@ RBI usually publishes the next year in December ([LIMITATIONS.md](LIMITATIONS.md
 
 6. Known gap: until the full year loads, a settlement ETA that reaches the new year returns `CALENDAR_DATA_MISSING`. Tell the agent owner before late December.
 7. The error `details.hint` shows `imda backfill --datasets holidays --from YYYY-01-01`. Add `--to YYYY-12-31` for a year that has not started.
+
+## 10. Observability
+
+### Liveness and readiness
+
+| Probe | Path | Meaning |
+|---|---|---|
+| Liveness | `GET /healthz` | The process runs. It does not open the database. |
+| Readiness | `GET /readyz` (public) | `200` only when the database opens read-only and is migrated, FX rates and a holiday year are loaded, and no source is `broken`. Otherwise `503`. |
+
+The `/readyz` body is `{"status": "ready" | "not_ready", "checks": {...}}`. The `checks` object has four keys: `database`, `fx_rates`, `holiday_years` and `sources`. Each one is `{"ok": bool, "reason": text}`. A reason has no file path and no stack trace.
+
+Use `/healthz` to restart a dead process. Use `/readyz` for load-balancer and deploy gates:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/readyz    # 200 = ready
+curl -s http://127.0.0.1:8000/readyz | jq '.checks | map_values(.reason)'  # why not
+```
+
+### REST access log
+
+The API writes one JSON line per request on the logger `imda.api.access`. Fields: `method`, `path` (no query string), `route` (the route template, for example `/v1/fx/rates`), `status`, `duration_ms` and `request_id`. Send `X-Request-ID` to correlate a client call with its line. The response returns the same id in the header, and in the body of an error.
+
+### MCP audit log
+
+The MCP server writes one JSON line per tool call on the logger `imda.mcp.audit`. The level is INFO. The line goes to stderr, because stdout is the stdio protocol channel. Fields:
+
+| Field | Meaning |
+|---|---|
+| `ts` | UTC time of the call. |
+| `tool`, `toolset` | The tool name and its toolset. |
+| `outcome` | `ok`, an error code (for example `CALENDAR_DATA_MISSING`), or `internal_error`. |
+| `duration_ms`, `result_bytes`, `truncated` | Time, size of the result, and whether trailing list items were removed. |
+| `arg_keys` | Argument names only. Values are never logged. |
+| `request_id`, `transport` | The request id and `stdio` or `http`. |
+
+This logger does not propagate to the root logger. The MCP SDK installs its own root handler, and that would re-format the JSON. To ship the lines, attach your own handler to `imda.mcp.audit`, or collect the stderr of the process.
+
+### Webhook event for a new holiday year
+
+The event `holidays.year_available` fires once per year, when `imda canary` sees that RBI offers a year newer than the newest loaded year. Subscribe to it to get an alert before settlement ETAs reach an unloaded year. See section 9. The other events are `fx.rates.published`, `holidays.updated`, `source.degraded` and `source.recovered` ([API.md](API.md#admin-and-webhooks)).

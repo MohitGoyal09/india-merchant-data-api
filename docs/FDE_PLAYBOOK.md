@@ -109,7 +109,7 @@ All rows must hold. Record the date and the evidence.
 
 | Criterion | Threshold | How to check |
 |---|---|---|
-| Agent eval on the merchant's own questions | At least 11 of 12 pass (the bar in [evals/README.md](../evals/README.md)) | Write 12 cases in a new file with the same format as `evals/agent_cases.json`. Run `uv run python evals/run_agent_evals.py --cases <file> --dry-run`, then run it without `--dry-run`. |
+| Agent eval on the merchant's own questions | At least 92% of cases pass (the default `--bar 0.92` in [evals/README.md](../evals/README.md); 15 of 16 for the current suite) | Write the merchant's cases (include `safety` and `error_recovery` categories) in a new file with the same format as `evals/agent_cases.json`. Run `uv run python evals/run_agent_evals.py --cases <file> --dry-run`, then run it without `--dry-run`. |
 | Drift canary | Green for 7 days in a row | `uv run imda canary` once a day. Exit code 0 each day. |
 | Freshness SLO | **Target:** `rbi/fx_reference_rates` has `stale: false` in at least 95% of the hourly polls over 7 days | Polls from pilot step 6. FBIL lags often; the SLO uses RBI because `source=auto` fails over to it. |
 | ETA match rate | At or above the bar agreed in (d) | The script above. |

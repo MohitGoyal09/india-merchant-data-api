@@ -54,7 +54,9 @@ flowchart LR
 | `src/imda/health/` | Drift check against `baselines.json`, canary, freshness. |
 | `src/imda/events/` | Webhook signing, SSRF guard, delivery with retries. |
 | `src/imda/mcp/`, `src/imda/agent/` | Read-only MCP server (13 tools, stdio and HTTP `/mcp`) and the demo agent loop. See [MCP.md](MCP.md). |
-| `src/imda/api/` | FastAPI app, routes, success envelope, error handlers, ICS and CSV output. |
+| `src/imda/api/` | FastAPI app, routes, success envelope, error handlers, ICS and CSV output. Includes `GET /healthz` (liveness) and `GET /readyz` (readiness). |
+| `src/imda/api/console/` | The Merchant Console: static HTML, CSS and JS served at `GET /console` with a strict Content-Security-Policy. It calls the same REST API. |
+| `src/imda/observability.py` | Readiness checks for `/readyz`, the route-template helper for the access log, and the MCP audit log (`imda.mcp.audit`). See [RUNBOOK.md](RUNBOOK.md#10-observability). |
 | `src/imda/worker.py`, `cli.py` | The `imda` command and the scheduled worker. |
 
 ## The SourceAdapter contract
@@ -104,7 +106,8 @@ class SourceAdapter(Protocol[Q, T]):
    health is `degraded` or `broken`, and adds a warning.
 5. Errors go through one handler. The body is `{"error": {code, message, details}, "request_id"}`.
    An unexpected exception becomes `INTERNAL_ERROR`, and the trace stays in the server log.
-6. The middleware writes one JSON access-log line and returns the `X-Request-ID` header.
+6. The middleware writes one JSON access-log line on `imda.api.access` (method, path, route template,
+   status, duration, request id) and returns the `X-Request-ID` header.
 
 Field names and the error code list are in [API.md](API.md). A sequence diagram of this flow is in the [README](../README.md#how-it-works).
 
@@ -175,9 +178,12 @@ events only. It never writes rates or holidays.
 | Fault injection | `test_http_client.py`, `test_ingest.py`, `test_canary.py` | 429 with `Retry-After`, timeouts, 5xx, truncated pages and unknown markers lead to `degraded` or `broken` health, kept data and no 500. |
 | API | `tests/api/` | Every endpoint, on the success path and on each error code. |
 | Live (opt-in) | `tests/contract/`, `make test-live` | A few real calls to RBI and FBIL. They are not part of `make test`. |
+| Property | `tests/property/` | `hypothesis` tests of the calendar, settlement, FX service, cursors, ICS, signing, sanitiser and API robustness. Run with `uv run pytest tests/property`; `HYPOTHESIS_PROFILE=ci` selects the CI profile. |
+| MCP contract | `tests/mcp/` | Every tool, errors, size limits, sanitiser, audit log, stdio and HTTP, compared with the REST API. `make mcp-evals`. No LLM, no network. |
 | Cases script | `scripts/run_cases.py`, `scripts/cases.py` | 31 named cases through the real API. `make cases` runs offline on a seeded fixture database. `make cases-live` runs against a running server. |
 
 `make check` runs `ruff`, `mypy --strict` and the offline tests with coverage. Result on
-2026-10-02: lint clean, mypy clean on 82 source files, **1,295 tests passed** (5 live tests
-deselected), **98.68% coverage** (the gate is 80%). CI runs the same `make check`
+2026-10-02: lint clean, mypy clean on 85 source files, **1,491 tests passed** (5 live tests
+deselected), **98.45% coverage** (the gate is 80%). Of these, 60 are property tests and 238 are MCP
+contract tests (`make demo-mcp` adds 21 asserted checks over real stdio). CI runs the same `make check`
 (`.github/workflows/ci.yml`).

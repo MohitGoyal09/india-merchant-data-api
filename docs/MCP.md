@@ -233,20 +233,21 @@ Real example: `fetch_holidays` with `office=mumbai, year=2031`:
 | Concurrency | At most 8 tool calls run at once. Extra calls wait; they do not fail. Structured results above 48 KB are returned with trailing list items removed and a warning. |
 | Read-only mode and WAL | The database is opened with `mode=ro` and never modified, but SQLite creates `-wal` and `-shm` files next to it. The directory must be writable. |
 | Untrusted text | Holiday names and error texts come from scraped pages. The server applies NFKC, removes control, format (zero-width, bidi, tag), private-use, unassigned and filler characters, and caps each string at 300 characters. This stops hidden structure, not a plain-language "ignore your instructions" sentence: that relies on the model treating tool text as data. The `settlement_answer` prompt caps the question at 1,000 characters and puts it in a `<merchant_question>` block marked as data. The server `instructions` and the tool descriptions tell the model to treat such text as data, never as instructions. |
+| Audit log | One JSON line per tool call on the logger `imda.mcp.audit` (stderr). It holds the tool, outcome, timing, size and argument names. It never holds argument values. See [RUNBOOK.md](RUNBOOK.md#10-observability). |
 | No secrets in output | Errors show field names and rules, not the rejected values. Unknown exceptions are logged and replaced by `INTERNAL_ERROR`. |
 
 ## 8. Testing
 
 | Layer | What | Command | Bar |
 |---|---|---|---|
-| 1. Contract evals (no LLM, no network) | Every tool, errors, annotations, output schemas, provenance, toolsets, stdio and HTTP with bearer auth. Each result is also compared with the REST API. | `make mcp-evals` | 227 tests passed in the last run (2026-10-02). Must be 100%. |
-| 2. Agent evals (Claude, opt-in) | Twelve merchant questions, scored by rules and not by a judge. | See [evals/README.md](../evals/README.md) | See [PLAN_MCP.md](PLAN_MCP.md) section 5 |
+| 1. Contract evals (no LLM, no network) | Every tool, errors, annotations, output schemas, provenance, toolsets, stdio and HTTP with bearer auth. Each result is also compared with the REST API. | `make mcp-evals` | 238 tests passed in the last run (2026-10-02). Must be 100%. |
+| 2. Agent evals (Claude, opt-in) | Sixteen merchant questions in nine categories, scored by rules and not by a judge. Bar: 15 of 16 (at least 92%). | See [evals/README.md](../evals/README.md) | See [PLAN_MCP.md](PLAN_MCP.md) section 5 |
 | 3. Spec freshness | `docs/mcp_tool_spec.json` matches the live server. | `uv run python scripts/export_tool_spec.py --check` | Exit code 0 |
 
 After you change a tool, run `uv run python scripts/export_tool_spec.py` to refresh the spec.
 
 
-**Latest live agent eval (2026-10-02, `claude-opus-5-5`): 12/12 passed, tool selection 100%, about USD 0.25.** See [`evals/README.md`](../evals/README.md) and the demo transcript [`demo/usd-invoice-settlement.md`](demo/usd-invoice-settlement.md).
+**Latest live agent eval (2026-10-02, run 4, `claude-opus-5-5`): 16/16 passed in 9 categories, tool selection 100%, about USD 0.28.** The bar is 15/16. Run 3 scored 14/16 because two correct answers failed regex checks that were too narrow; the checks were widened and regression tests were added. See the run history in [`evals/README.md`](../evals/README.md#live-run-history). More: [`evals/README.md`](../evals/README.md) and the demo transcript [`demo/usd-invoice-settlement.md`](demo/usd-invoice-settlement.md).
 
 ## 9. How this maps to Agent Studio
 

@@ -149,6 +149,7 @@ Events:
 |---|---|
 | `fx.rates.published` | An ingest run stored new FX rates. |
 | `holidays.updated` | An ingest run stored holiday rows. |
+| `holidays.year_available` | The canary saw that RBI offers a holiday year newer than the newest loaded year. Sent once per year. |
 | `source.degraded` | A source changes from healthy to `degraded` or `broken`. |
 | `source.recovered` | A source returns to `ok`. |
 
