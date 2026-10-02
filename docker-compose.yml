@@ -1,5 +1,7 @@
 # One image, one volume. `api` serves reads; `worker` keeps the data fresh and delivers
 # webhooks. `backfill` is a one-shot: docker compose --profile tools run --rm backfill
+# `mcp` serves the MCP connector over HTTP: IMDA_MCP_TOKEN=... docker compose --profile mcp up -d mcp
+# Containers never restart on their own (restart: "no"), so nothing starts when Docker opens.
 x-imda: &imda
   image: imda:dev
   build: .
@@ -10,7 +12,7 @@ x-imda: &imda
     IMDA_DB_PATH: /data/imda.sqlite3
   volumes:
     - imda-data:/data
-  restart: unless-stopped
+  restart: "no"
 
 services:
   api:
@@ -32,6 +34,19 @@ services:
     healthcheck:
       disable: true
     command: ["imda", "backfill", "--from", "2024-01-01"]
+
+  mcp:
+    <<: *imda
+    profiles: ["mcp"]
+    environment:
+      IMDA_DB_PATH: /data/imda.sqlite3
+      IMDA_MCP_TOKEN: ${IMDA_MCP_TOKEN:?set IMDA_MCP_TOKEN (32+ characters) to run the mcp service}
+    command: ["imda", "mcp", "--transport", "http", "--host", "0.0.0.0", "--port", "8100",
+              "--allowed-host", "127.0.0.1:8100", "--allowed-host", "localhost:8100"]
+    ports:
+      - "127.0.0.1:8100:8100"
+    healthcheck:
+      disable: true  # the image check probes the API port; the MCP service listens on 8100
 
 volumes:
   imda-data:

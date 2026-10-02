@@ -6,7 +6,7 @@ import datetime as dt
 import json
 import signal
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict
 from enum import StrEnum
@@ -154,6 +154,20 @@ def refresh_command() -> None:
     _report(_run_refresh(get_settings()))
 
 
+def _current_error(row: Mapping[str, object]) -> str:
+    """The last error, only while it is newer than the last success (a fixed error is history)."""
+    error, error_at, ok_at = (
+        row.get("last_error"),
+        row.get("last_error_at"),
+        row.get("last_success_at"),
+    )
+    if not error or not error_at:
+        return "-"
+    if ok_at and str(ok_at) >= str(error_at):
+        return "-"
+    return str(error)
+
+
 @app.command("status")
 def status_command() -> None:
     """Show source health and the most recent ingest runs."""
@@ -165,7 +179,7 @@ def status_command() -> None:
         name = f"{row['source']}/{row['dataset']}"
         typer.echo(
             f"{name:<28} {row['status']!s:<9} {str(row['last_success_at'] or '-')[:19]:<19} "
-            f"{row['last_error'] or '-'}"
+            f"{_current_error(row)}"
         )
     if not health:
         typer.echo("(no source health recorded yet: run `imda refresh` or `imda backfill`)")

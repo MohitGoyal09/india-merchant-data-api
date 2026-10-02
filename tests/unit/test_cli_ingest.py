@@ -150,3 +150,39 @@ def test_default_client_factory_builds_a_polite_client(tmp_path: Path) -> None:
 
 def test_today_is_an_ist_date() -> None:
     assert isinstance(cli._today(), dt.date)
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        (
+            {
+                "last_error": "boom",
+                "last_error_at": "2026-10-02T07:00:00+00:00",
+                "last_success_at": "2026-10-02T08:00:00+00:00",
+            },
+            "-",
+        ),
+        (
+            {
+                "last_error": "boom",
+                "last_error_at": "2026-10-02T09:00:00+00:00",
+                "last_success_at": "2026-10-02T08:00:00+00:00",
+            },
+            "boom",
+        ),
+        (
+            {
+                "last_error": "boom",
+                "last_error_at": "2026-10-02T09:00:00+00:00",
+                "last_success_at": None,
+            },
+            "boom",
+        ),
+        ({"last_error": None, "last_error_at": None, "last_success_at": None}, "-"),
+    ],
+)
+def test_status_hides_errors_that_were_followed_by_a_success(row, expected):
+    from imda.cli import _current_error
+
+    assert _current_error(row) == expected
