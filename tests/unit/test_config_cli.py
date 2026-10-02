@@ -12,12 +12,23 @@ from imda.sources.base import ParseError, RawPayload, UpstreamError, UpstreamReq
 
 def test_settings_read_env_prefix(monkeypatch):
     monkeypatch.setenv("IMDA_MIN_INTERVAL_SECONDS", "0.5")
-    monkeypatch.setenv("IMDA_ADMIN_TOKEN", "s3cret")
+    monkeypatch.setenv("IMDA_ADMIN_TOKEN", "s3cret-" + "x" * 32)
     settings = Settings(_env_file=None)
     assert settings.min_interval_seconds == 0.5
     assert settings.admin_token is not None
-    assert settings.admin_token.get_secret_value() == "s3cret"
+    assert settings.admin_token.get_secret_value() == "s3cret-" + "x" * 32
     assert "s3cret" not in repr(settings)
+
+
+def test_settings_reject_short_admin_token(monkeypatch):
+    monkeypatch.setenv("IMDA_ADMIN_TOKEN", "short")
+    with pytest.raises(ValueError, match="at least 32"):
+        Settings(_env_file=None)
+
+
+def test_settings_treat_blank_admin_token_as_unset(monkeypatch):
+    monkeypatch.setenv("IMDA_ADMIN_TOKEN", "   ")
+    assert Settings(_env_file=None).admin_token is None
 
 
 def test_settings_reject_invalid_values(monkeypatch):

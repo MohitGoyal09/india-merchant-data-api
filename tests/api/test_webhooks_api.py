@@ -13,7 +13,7 @@ from imda.store.webhooks_repo import WebhookRepo
 from tests.api.conftest import MakeClient
 from tests.api.helpers import assert_envelope, assert_error, body
 
-TOKEN = "webhook-test-token"
+TOKEN = "webhook-test-token-0123456789abcdef0123"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 PUBLIC_URL = "https://93.184.216.34/hook"  # an IP literal: resolves with no network
 

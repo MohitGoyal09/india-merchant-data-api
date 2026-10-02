@@ -19,7 +19,7 @@ from imda.models import IST
 from tests.api.conftest import FRESH_NOW, MakeClient
 from tests.api.helpers import assert_error, body
 
-TOKEN = "s3cret-admin-token-value"
+TOKEN = "s3cret-admin-token-value-0123456789abcdef"
 PROTECTED = "/v1/webhooks"
 
 
