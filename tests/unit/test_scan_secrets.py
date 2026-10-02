@@ -150,3 +150,14 @@ def test_the_allowlist_file_itself_is_not_scanned(scan_secrets: ModuleType, repo
 
 def test_this_repository_has_no_secrets(scan_secrets: ModuleType) -> None:
     assert scan_secrets.scan_repo(REPO) == []
+
+
+def test_tracked_files_without_git_skips_venv_data_and_env(
+    scan_secrets: ModuleType, tmp_path: Path
+) -> None:
+    # An unpacked submission zip has no .git; the scan must still cover the source tree.
+    for rel in ["src/a.py", ".venv/lib/x.py", "data/imda.sqlite3", ".env", "docs/b.md"]:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x")
+    assert scan_secrets.tracked_files(tmp_path) == ["docs/b.md", "src/a.py"]

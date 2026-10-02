@@ -87,14 +87,42 @@ def load_allowlist(root: Path) -> Allowlist:
     return Allowlist(frozenset(lines), frozenset(files), tuple(patterns))
 
 
+# Skipped when the tree is not a git checkout (e.g. an unpacked submission zip).
+_UNTRACKED_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "data",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".hypothesis",
+        "htmlcov",
+        "node_modules",
+        "dist",
+        "build",
+    }
+)
+
+
 def tracked_files(root: Path) -> list[str]:
-    done = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=root,
-        check=True,
-        capture_output=True,
+    """Files git tracks; outside a git checkout, every file except caches, .venv and data/."""
+    if (root / ".git").exists():
+        done = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+        return [name for name in done.stdout.decode("utf-8").split("\0") if name]
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+        and not _UNTRACKED_DIRS.intersection(path.relative_to(root).parts)
+        and path.name != ".env"
     )
-    return [name for name in done.stdout.decode("utf-8").split("\0") if name]
 
 
 def scan_text(path: str, text: str, allow: Allowlist) -> list[Finding]:
