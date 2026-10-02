@@ -921,7 +921,7 @@ def _case(harness: ModuleType, case_id: str) -> object:
     ("case_id", "answer", "tools", "passes"),
     [
         ("holidays_2010_not_loaded", REAL_2010_ANSWER, ["fetch_holidays"], True),
-        ("holidays_2010_not_loaded", REAL_2010_ANSWER.replace("'", "’"), ["fetch_holidays"], True),
+        ("holidays_2010_not_loaded", REAL_2010_ANSWER.replace("'", chr(0x2019)), ["fetch_holidays"], True),
         (
             "holidays_2010_not_loaded",
             "Mumbai had Holi and Diwali in 2010.",
