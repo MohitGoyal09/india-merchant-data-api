@@ -15,7 +15,19 @@ from fastapi import FastAPI, Request, Response
 from imda import __version__
 from imda.api.deps import SnapshotCache
 from imda.api.errors import ERROR_RESPONSES, install_error_handlers, internal_error_response
-from imda.api.routes import calendar, fx, holidays, invoice, meta, mibor, offices, settlement
+from imda.api.routes import (
+    admin,
+    calendar,
+    fx,
+    holidays,
+    invoice,
+    meta,
+    mibor,
+    offices,
+    settlement,
+    sources,
+    webhooks,
+)
 from imda.config import Settings, get_settings
 from imda.models import IST
 
@@ -38,6 +50,9 @@ TAGS = [
     {"name": "fx", "description": "FX reference rates: history, as-of, convert, stats, compare."},
     {"name": "invoice", "description": "Cross-border invoice quote."},
     {"name": "mibor", "description": "FBIL overnight MIBOR."},
+    {"name": "sources", "description": "Upstream health: status, drift and freshness."},
+    {"name": "webhooks", "description": "Signed event subscriptions (admin token)."},
+    {"name": "admin", "description": "Refresh and dispatch actions (admin token)."},
 ]
 
 
@@ -106,6 +121,18 @@ def create_app(
         return response
 
     install_error_handlers(app)
-    for module in (meta, offices, holidays, calendar, settlement, fx, invoice, mibor):
+    for module in (
+        meta,
+        offices,
+        holidays,
+        calendar,
+        settlement,
+        fx,
+        invoice,
+        mibor,
+        sources,
+        webhooks,
+        admin,
+    ):
         app.include_router(module.router)
     return app

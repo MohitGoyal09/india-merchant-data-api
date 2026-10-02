@@ -112,6 +112,11 @@ class Store:
         migrate(conn)
         return cls(conn)
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """The open connection, for modules that run their own queries (webhooks)."""
+        return self._conn
+
     def close(self) -> None:
         self._conn.close()
 

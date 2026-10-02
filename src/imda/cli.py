@@ -3,22 +3,33 @@
 from __future__ import annotations
 
 import datetime as dt
-from contextlib import AbstractContextManager
+import json
+import signal
+import threading
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
+from dataclasses import asdict
 from typing import Annotated
 
 import typer
+import uvicorn
 
 from imda import __version__
 from imda.config import Settings, get_settings
+from imda.events.webhooks import DispatchReport, dispatch_pending
+from imda.health.canary import CanaryReport, run_canary
 from imda.http.client import PoliteClient
 from imda.ingest.backfill import backfill
 from imda.ingest.common import ExchangeLog, RunSummary
 from imda.ingest.refresh import refresh
-from imda.models import IST, Dataset
+from imda.models import IST, Dataset, SourceStatus
 from imda.sources.base import HttpClient
 from imda.store.repo import Store
+from imda.worker import JobOutcome, ScheduledJob, run_worker
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+webhooks_app = typer.Typer(help="Webhook delivery.", no_args_is_help=True)
+app.add_typer(webhooks_app, name="webhooks")
 
 DATASET_NAMES: dict[str, Dataset] = {
     "offices": Dataset.OFFICES,
@@ -27,6 +38,9 @@ DATASET_NAMES: dict[str, Dataset] = {
     "mibor": Dataset.MIBOR,
 }
 RECENT_RUNS = 5
+DEFAULT_HOST = "127.0.0.1"
+"""Loopback only. A container passes ``--host 0.0.0.0`` on purpose."""
+API_FACTORY = "imda.api.app:create_app"
 
 
 @app.callback()
@@ -114,15 +128,29 @@ def backfill_command(
     _report(summary)
 
 
-@app.command("refresh")
-def refresh_command() -> None:
-    """Fetch what is new: offices, holidays, FX and MIBOR."""
-    settings = get_settings()
+def _run_refresh(settings: Settings) -> RunSummary:
     with Store.open(settings.db_path) as store:
         log = ExchangeLog(store)
         with _open_client(settings, log) as client:
-            summary = refresh(store, client, today=_today(), exchange_log=log)
-    _report(summary)
+            return refresh(store, client, today=_today(), exchange_log=log)
+
+
+def _run_canary(settings: Settings) -> CanaryReport:
+    with Store.open(settings.db_path) as store:
+        log = ExchangeLog(store)
+        with _open_client(settings, log) as client:
+            return run_canary(store, client, today=_today(), exchange_log=log)
+
+
+def _run_dispatch(settings: Settings) -> DispatchReport:
+    with Store.open(settings.db_path) as store:
+        return dispatch_pending(store.connection, settings)
+
+
+@app.command("refresh")
+def refresh_command() -> None:
+    """Fetch what is new: offices, holidays, FX and MIBOR."""
+    _report(_run_refresh(get_settings()))
 
 
 @app.command("status")
@@ -146,3 +174,98 @@ def status_command() -> None:
         typer.echo(
             f"{run['run_id']!s:<36} {run['kind']!s:<9} {run['status']!s:<8} {run['started_at']}"
         )
+
+
+@app.command("serve")
+def serve_command(
+    host: Annotated[str, typer.Option(help="Bind address.")] = DEFAULT_HOST,
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Port.")] = 8000,
+    reload: Annotated[bool, typer.Option(help="Reload on code changes (dev only).")] = False,
+) -> None:
+    """Run the API with uvicorn."""
+    uvicorn.run(API_FACTORY, factory=True, host=host, port=port, reload=reload)
+
+
+@app.command("canary")
+def canary_command() -> None:
+    """Sample every source once, compare it with the baselines and record source health.
+
+    Exit code 1 when a source is broken (its sample no longer parses); 0 otherwise.
+    """
+    report = _run_canary(get_settings())
+    typer.echo(f"{'SOURCE/DATASET':<28} {'STATUS':<9} {'REQ':>3}  DETAIL")
+    for result in report.results:
+        typer.echo(
+            f"{result.key:<28} {result.status.value:<9} {result.requests:>3}  {result.error or '-'}"
+        )
+    typer.echo(f"overall: {report.status.value} ({report.requests} requests)")
+    if report.status is SourceStatus.BROKEN:
+        raise typer.Exit(code=1)
+
+
+def _echo_dispatch(report: DispatchReport) -> None:
+    typer.echo(
+        f"dispatch: sent={report.sent} succeeded={report.succeeded} failed={report.failed} "
+        f"skipped_unsafe={report.skipped_unsafe}"
+    )
+
+
+@webhooks_app.command("dispatch")
+def webhooks_dispatch_command() -> None:
+    """Make one delivery pass over every webhook event that is due."""
+    _echo_dispatch(_run_dispatch(get_settings()))
+
+
+def _refresh_outcome(settings: Settings) -> JobOutcome:
+    summary = _run_refresh(settings)
+    detail = {"run_id": summary.run_id, "run_status": summary.status, "requests": summary.requests}
+    return summary.status != "failed", detail
+
+
+def _dispatch_outcome(settings: Settings) -> JobOutcome:
+    return True, asdict(_run_dispatch(settings))
+
+
+def _emit_json(record: dict[str, object]) -> None:
+    stamp = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    typer.echo(json.dumps({"ts": stamp, **record}, sort_keys=True, default=str))
+
+
+@app.command("worker")
+def worker_command(
+    refresh_every_minutes: Annotated[
+        int, typer.Option(min=1, help="Minutes between refreshes.")
+    ] = 360,
+    dispatch_every_seconds: Annotated[
+        int, typer.Option(min=1, help="Seconds between webhook dispatch passes.")
+    ] = 30,
+    once: Annotated[bool, typer.Option(help="One refresh and one dispatch, then exit.")] = False,
+) -> None:
+    """Refresh data and deliver webhooks on a schedule. Stops on SIGTERM or Ctrl-C.
+
+    With --once, exits 1 if a job failed (handy for cron).
+    """
+    settings = get_settings()
+    jobs = [
+        ScheduledJob("refresh", refresh_every_minutes * 60, lambda: _refresh_outcome(settings)),
+        ScheduledJob("dispatch", dispatch_every_seconds, lambda: _dispatch_outcome(settings)),
+    ]
+    stop = threading.Event()
+    with _sigterm_stops(stop):
+        ok = run_worker(jobs, emit=_emit_json, once=once, sleep=stop.wait, should_stop=stop.is_set)
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+@contextmanager
+def _sigterm_stops(stop: threading.Event) -> Iterator[None]:
+    """Make SIGTERM request a clean stop. Only the main thread may install handlers."""
+    try:
+        previous = signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    except ValueError:  # pragma: no cover - not the main thread
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)

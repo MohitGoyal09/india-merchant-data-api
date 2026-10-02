@@ -45,12 +45,14 @@ class ApiError(Exception):
         code: str,
         message: str,
         details: Mapping[str, object] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
         self.details = dict(details or {})
+        self.headers = dict(headers or {})
 
 
 def office_not_found(slug: str) -> ApiError:
@@ -100,7 +102,9 @@ def _field_errors(errors: Sequence[Mapping[str, Any]]) -> list[dict[str, object]
 
 def _on_api_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ApiError)
-    return error_response(request, exc.status_code, exc.code, exc.message, exc.details)
+    return error_response(
+        request, exc.status_code, exc.code, exc.message, exc.details, headers=exc.headers
+    )
 
 
 def _on_request_validation(request: Request, exc: Exception) -> JSONResponse:
