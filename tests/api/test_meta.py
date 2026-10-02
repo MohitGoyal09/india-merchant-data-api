@@ -96,7 +96,16 @@ def test_access_log_line_is_structured_and_has_no_query_string(
     assert record["status"] == 200
     assert record["request_id"] == "log-1"
     assert record["duration_ms"] >= 0
-    assert set(record) == {"event", "method", "path", "status", "duration_ms", "request_id"}
+    assert record["route"] == "/v1/offices"
+    assert set(record) == {
+        "event",
+        "method",
+        "path",
+        "route",
+        "status",
+        "duration_ms",
+        "request_id",
+    }
     assert "sekret" not in access_lines[-1]
 
 

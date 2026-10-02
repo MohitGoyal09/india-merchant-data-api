@@ -40,6 +40,7 @@ from imda.api.routes import (
 )
 from imda.config import Settings, get_settings
 from imda.models import IST
+from imda.observability import route_template
 from imda.store.repo import Store
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -196,6 +197,7 @@ def create_app(
                     "event": "request",
                     "method": request.method,
                     "path": request.url.path,
+                    "route": route_template(request),
                     "status": response.status_code,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 2),
                     "request_id": request_id,
