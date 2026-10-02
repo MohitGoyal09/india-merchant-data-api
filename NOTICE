@@ -1,0 +1,17 @@
+India Merchant Data API
+Copyright (c) 2026 Mohit Goyal. All rights reserved.
+
+This repository is shared for evaluation by Razorpay's hiring team as part of the
+Forward-Deployed Engineer (Agent Studio) take-home. No licence is granted to copy,
+modify, or redistribute the code.
+
+Data notice
+- The code fetches public data from the Reserve Bank of India (rbi.org.in) and
+  Financial Benchmarks India Pvt Ltd (fbil.org.in). RBI and FBIL own that data.
+- The repository does not ship a dataset. Each user builds a local copy with
+  `imda backfill`. tests/fixtures/ holds short recorded samples, used only so the
+  test suite runs offline.
+- FBIL benchmarks need FBIL's authorisation for commercial use or redistribution.
+  See docs/LIMITATIONS.md.
+- No secrets, API keys, or real customer data are included. Amounts and payment
+  dates in examples are made up.

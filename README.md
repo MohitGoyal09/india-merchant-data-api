@@ -1,5 +1,7 @@
 # India Merchant Data API
 
+[![ci](https://github.com/MohitGoyal09/india-merchant-data-api/actions/workflows/ci.yml/badge.svg)](https://github.com/MohitGoyal09/india-merchant-data-api/actions/workflows/ci.yml)
+
 An API for data that RBI and FBIL only publish as web pages.
 
 Indian merchants ask two questions every day. "When does my settlement arrive?" The answer
@@ -460,3 +462,7 @@ Every result has a summary line, JSON, `provenance` and `warnings`. Errors are r
 - [docs/MCP.md](docs/MCP.md): tools, host configs, errors, and what the agent can and cannot do.
 - [docs/mcp_tool_spec.json](docs/mcp_tool_spec.json): the tool spec, generated from the live server.
 - [docs/PLAN_MCP.md](docs/PLAN_MCP.md): design decisions and the eval plan.
+
+## Licence
+
+All rights reserved. Shared for evaluation only. See [NOTICE](NOTICE).
