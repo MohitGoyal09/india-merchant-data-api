@@ -1,4 +1,4 @@
-.PHONY: install fmt lint typecheck test test-live cov check cases cases-live agent-demo agent-evals serve backfill refresh canary docker-build docker-up mcp-evals
+.PHONY: install fmt lint typecheck test test-live cov check cases cases-live agent-demo agent-evals serve backfill refresh canary docker-build docker-up mcp-evals demo-mcp smoke-compose security
 
 install:
 	uv sync --quiet
@@ -64,3 +64,16 @@ docker-build:
 
 docker-up:
 	docker compose up --build -d api worker
+
+# Keyless MCP demo: seeds a temp DB, starts `imda mcp` over stdio, runs ~20 asserted checks.
+demo-mcp:
+	uv run python scripts/demo_mcp.py
+
+# Builds the image and exercises api + mcp under an isolated compose project. Needs Docker.
+smoke-compose:
+	bash scripts/smoke_compose.sh
+
+# Static security scan (medium+ severity fails) and known-vulnerability scan of the lockfile deps.
+security:
+	uv run bandit -r src -q -ll
+	uv run pip-audit

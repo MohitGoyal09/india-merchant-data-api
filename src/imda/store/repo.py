@@ -403,7 +403,8 @@ class Store:
             args.extend(_year_bounds(year))
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._conn.execute(
-            f"SELECT * FROM holidays{where} ORDER BY office_slug, date, kind",  # noqa: S608
+            # Fixed fragments only; every value is a bound "?" parameter.
+            f"SELECT * FROM holidays{where} ORDER BY office_slug, date, kind",  # noqa: S608  # nosec B608
             args,
         ).fetchall()
         return [_holiday_from_row(r) for r in rows]
